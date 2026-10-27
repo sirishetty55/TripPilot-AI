@@ -50,7 +50,12 @@ class TestAttractionImages(unittest.TestCase):
 
         result = parse_with_heuristics(snapshot, request, "https://en.wikivoyage.org/wiki/Manali")
 
-        self.assertEqual([item.name for item in result.attractions], ["Hadimba Devi Temple"])
+        # The heuristic parser should keep "Hadimba Devi Temple" (valid attraction)
+        # AND supplement with curated Manali sights (minimum 4 attractions enforced)
+        attraction_names = [item.name for item in result.attractions]
+        self.assertIn("Hadimba Devi Temple", attraction_names)
+        # Should have at least 4 attractions total (curated supplements added)
+        self.assertGreaterEqual(len(result.attractions), 4)
         self.assertEqual(result.attractions[0].image_url, "https://upload.wikimedia.org/hadimba.jpg")
 
     @patch("services.image_service.urlopen", side_effect=OSError("offline"))
@@ -96,6 +101,53 @@ class TestAttractionImages(unittest.TestCase):
         # Real tourist attractions must be returned instead
         self.assertTrue(len(attraction_names) >= 3, "Must provide real tourist attractions")
         self.assertTrue(any("Vasa" in name or "Gamla Stan" in name or "Palace" in name for name in attraction_names))
+
+    def test_is_valid_attraction_name_filters_guide_meta_and_accepts_real_sights(self):
+        from services.travel_research import is_valid_attraction_name
+        # Guide sections & meta terms must be rejected
+        self.assertFalse(is_valid_attraction_name("Regions", "Sweden"))
+        self.assertFalse(is_valid_attraction_name("Cities", "Sweden"))
+        self.assertFalse(is_valid_attraction_name("Other destinations", "Sweden"))
+        self.assertFalse(is_valid_attraction_name("Electricity and utilities", "Sweden"))
+        self.assertFalse(is_valid_attraction_name("The year in Sweden", "Sweden"))
+        self.assertFalse(is_valid_attraction_name("Tourist information", "Sweden"))
+        self.assertFalse(is_valid_attraction_name("Districts", "Paris"))
+        self.assertFalse(is_valid_attraction_name("Public holidays", "France"))
+        self.assertFalse(is_valid_attraction_name("Name", "Goa"))
+        self.assertFalse(is_valid_attraction_name("People", "Goa"))
+        self.assertFalse(is_valid_attraction_name("See", "Jaipur"))
+        self.assertFalse(is_valid_attraction_name("Eat", "Jaipur"))
+        self.assertFalse(is_valid_attraction_name("Drink", "Jaipur"))
+        self.assertFalse(is_valid_attraction_name("Sleep", "Jaipur"))
+
+        # Real attractions and landmarks must be accepted
+        self.assertTrue(is_valid_attraction_name("Vasa Museum", "Sweden"))
+        self.assertTrue(is_valid_attraction_name("Eiffel Tower", "Paris"))
+        self.assertTrue(is_valid_attraction_name("Louvre Museum", "Paris"))
+        self.assertTrue(is_valid_attraction_name("Kodi Beach", "Kundapura"))
+        self.assertTrue(is_valid_attraction_name("Maravanthe Beach", "Kundapura"))
+        self.assertTrue(is_valid_attraction_name("Amber Fort & Palace", "Jaipur"))
+        self.assertTrue(is_valid_attraction_name("Basilica of Bom Jesus", "Goa"))
+        self.assertTrue(is_valid_attraction_name("Hadimba Devi Temple", "Manali"))
+
+    def test_bengaluru_to_kundapura_transit_accuracy_and_redbus_no_undefined(self):
+        from services.travel_research import generate_commute_options
+        options = generate_commute_options("Kundapura", "Bengaluru", travel_date="2026-11-15")
+        
+        # Must have options
+        self.assertTrue(len(options) >= 3)
+
+        train_opts = [o for o in options if "train" in o.mode.lower()]
+        self.assertTrue(len(train_opts) >= 1)
+        # Must NOT claim a Vande Bharat train operates
+        self.assertNotIn("vande bharat train", train_opts[0].title.lower())
+        self.assertIn("do not assume a vande bharat operates", train_opts[0].details.lower())
+
+        bus_opts = [o for o in options if "bus" in o.mode.lower()]
+        self.assertTrue(len(bus_opts) >= 1)
+        # RedBus booking url must NOT contain 'undefined'
+        self.assertNotIn("undefined", bus_opts[0].booking_url.lower())
+        self.assertTrue("redbus.in" in bus_opts[0].booking_url or "google.com" in bus_opts[0].booking_url)
 
 
 if __name__ == "__main__":

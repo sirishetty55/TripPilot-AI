@@ -60,41 +60,6 @@ render_hero(
     "Autonomous travel research powered by genuine Playwright MCP browser automation and AI synthesis."
 )
 
-# Quick Presets Section
-st.markdown("### 🌟 Quick Demonstration Presets")
-st.write("Click a preset below to instantly load an authentic trip scenario with verified browser research:")
-
-col_p1, col_p2, col_p3 = st.columns(3)
-
-def load_preset(dest, budget, days, travelers, interests, accom, style):
-    today = date.today()
-    st.session_state["form_destination"] = dest
-    st.session_state["form_budget"] = float(budget)
-    st.session_state["form_departure"] = today + timedelta(days=14)
-    st.session_state["form_return"] = today + timedelta(days=14 + days - 1)
-    st.session_state["form_travelers"] = int(travelers)
-    st.session_state["form_interests"] = interests
-    st.session_state["form_accom"] = accom
-    st.session_state["form_style"] = style
-    st.session_state["form_demo_mode"] = False
-
-with col_p1:
-    if st.button("🌴 Goa 3-Day Coastal (₹15,000)", use_container_width=True):
-        load_preset("Goa", 15000, 3, 2, ["Beaches & Coastal", "History & Heritage", "Food & Culinary"], "budget", "balanced")
-        st.rerun()
-
-with col_p2:
-    if st.button("🏰 Jaipur 3-Day Royal Forts (₹18,000)", use_container_width=True):
-        load_preset("Jaipur", 18000, 3, 2, ["History & Heritage", "Shopping & Markets", "Food & Culinary"], "mid-range", "balanced")
-        st.rerun()
-
-with col_p3:
-    if st.button("🌿 Kerala 4-Day Backwaters (₹22,000)", use_container_width=True):
-        load_preset("Kerala", 22000, 4, 2, ["Nature & Landscapes", "Relaxation & Wellness", "Food & Culinary"], "mid-range", "relaxed")
-        st.rerun()
-
-st.markdown("---")
-
 # Feature A: Travel Search Form
 st.subheader("🔍 Plan & Research Your Trip")
 
@@ -111,36 +76,39 @@ default_style = st.session_state.get("form_style", "balanced")
 with st.form("travel_search_form"):
     col1, col2 = st.columns(2)
     with col1:
-        destination = st.text_input("📍 Destination", value=default_dest, placeholder="e.g. Goa, Jaipur, Kerala, Paris, Tokyo")
-        departure_date = st.date_input("📅 Departure Date", value=default_departure, min_value=date.today())
-        travelers = st.number_input("👥 Number of Travelers", min_value=1, max_value=20, value=default_travelers, step=1)
+        destination = st.text_input("📍 Destination", value=default_dest, placeholder="e.g. Goa, Jaipur, Kerala, Paris, Tokyo", key="form_destination")
+        departure_date = st.date_input("📅 Departure Date", value=default_departure, min_value=date.today(), key="form_departure")
+        travelers = st.number_input("👥 Number of Travelers", min_value=1, max_value=20, value=default_travelers, step=1, key="form_travelers")
         accommodation_pref = st.selectbox(
             "🏨 Accommodation Tier",
             options=ACCOMMODATION_TIERS,
             index=ACCOMMODATION_TIERS.index(default_accom) if default_accom in ACCOMMODATION_TIERS else 0,
-            format_func=lambda x: x.capitalize()
+            format_func=lambda x: x.capitalize(),
+            key="form_accom"
         )
 
     with col2:
-        starting_city = st.text_input("🛫 Starting City (Optional)", value="", placeholder="e.g. Mumbai, Delhi, Bangalore")
-        return_date = st.date_input("📅 Return Date", value=default_return, min_value=date.today())
-        budget_inr = st.number_input("💰 Total Trip Budget (INR ₹)", min_value=2000.0, max_value=1000000.0, value=default_budget, step=1000.0, format="%.0f")
+        starting_city = st.text_input("🛫 Starting City (Optional)", value=st.session_state.get("form_starting_city", ""), placeholder="e.g. Mumbai, Delhi, Bangalore", key="form_starting_city")
+        return_date = st.date_input("📅 Return Date", value=default_return, min_value=date.today(), key="form_return")
+        budget_inr = st.number_input("💰 Total Trip Budget (INR ₹)", min_value=2000.0, max_value=1000000.0, value=default_budget, step=1000.0, format="%.0f", key="form_budget")
         travel_style = st.selectbox(
             "🎒 Travel Pace & Style",
             options=TRAVEL_STYLES,
             index=TRAVEL_STYLES.index(default_style) if default_style in TRAVEL_STYLES else 1,
-            format_func=lambda x: f"{x.capitalize()} Pace"
+            format_func=lambda x: f"{x.capitalize()} Pace",
+            key="form_style"
         )
 
     interests = st.multiselect(
         "🎯 Travel Interests & Activities",
         options=INTEREST_OPTIONS,
-        default=default_interests
+        default=default_interests,
+        key="form_interests"
     )
 
     st.caption("🌐 **Live Web Scraping Active:** Playwright MCP will navigate real public travel websites (Wikivoyage / Wikipedia / Official Tourism Portals) and Gemini AI will synthesize verified findings.")
 
-    research_btn = st.form_submit_button("🚀 Research Real Websites with Playwright MCP", type="primary", use_container_width=True)
+    research_btn = st.form_submit_button("🚀 Research Real Websites with Playwright MCP", type="primary", width="stretch")
 
 # Validation & Execution
 if research_btn:
@@ -153,6 +121,17 @@ if research_btn:
     if return_date < departure_date:
         st.error("Return date cannot be earlier than departure date! Please adjust your travel dates.")
         st.stop()
+
+    # A new search must never display the previous trip as its result.
+    # Keep the saved SQLite history intact; clear only the active in-memory trip.
+    for key in (
+        "active_trip_id",
+        "active_trip_request",
+        "active_research_result",
+        "active_itinerary",
+        "active_budget",
+    ):
+        st.session_state.pop(key, None)
 
     # Create TripRequest model
     trip_req = TripRequest(
@@ -176,17 +155,43 @@ if research_btn:
     log_expander = st.expander("🔍 View Live Browser Automation Logs (Playwright MCP)", expanded=True)
     log_placeholder = log_expander.empty()
     
+    # Save a snapshot of the submitted request. The widgets already use these
+    # session-state keys, so do not assign to those keys after widget creation.
+    # Streamlit raises StreamlitWidgetAlreadyInstantiatedError in that case.
+    st.session_state["last_trip_request_form"] = trip_req.to_dict()
+
     logs = []
     final_result: TripResearchResult = None
 
-    # Execute research generator
-    for msg, pct, res in execute_travel_research(trip_req, session_state=st.session_state):
-        progress_bar.progress(pct)
-        status_text.markdown(f"**{msg}**")
-        logs.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
-        log_placeholder.code("\n".join(logs), language="text")
-        if res:
-            final_result = res
+    # Execute research generator. A progress message alone is NOT a successful result.
+    try:
+        for msg, pct, res in execute_travel_research(trip_req, session_state=st.session_state):
+            progress_bar.progress(max(0.0, min(1.0, float(pct))))
+            status_text.markdown(f"**{msg}**")
+            logs.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+            log_placeholder.code("\n".join(logs), language="text")
+            if isinstance(res, TripResearchResult):
+                final_result = res
+    except Exception as exc:
+        st.error(f"Research failed before a usable result was produced: {type(exc).__name__}: {exc}")
+        st.exception(exc)
+        final_result = None
+
+    # Never accept stale or unrelated fallback data as the result for this request.
+    if final_result:
+        requested_destination = " ".join(trip_req.destination.casefold().split())
+        returned_destination = " ".join(str(final_result.destination or "").casefold().split())
+        if requested_destination != returned_destination:
+            st.error(
+                f"Destination mismatch: you requested '{trip_req.destination}', "
+                f"but the research service returned '{final_result.destination}'. "
+                "These results were rejected and were NOT saved. Please retry after checking the research logs."
+            )
+            final_result = None
+
+    if final_result and not (final_result.attractions or final_result.accommodations or final_result.food_experiences or final_result.commute_options):
+        st.error("Research returned an empty result. It has not been saved as a successful trip. Please retry; if this repeats, inspect the MCP/Gemini logs.")
+        final_result = None
 
     if final_result:
         # Generate Itinerary
@@ -226,16 +231,17 @@ if research_btn:
 
         st.success(f"🎉 Research completed successfully! Trip ID #{trip_id} saved to database.")
 
-        # Quick Results Summary Cards
+        # Quick Results Summary Cards — 4 Columns: Destination, Duration, Party Size, Estimated Trip Cost
         col_r1, col_r2, col_r3, col_r4 = st.columns(4)
         with col_r1:
-            st.metric("Destination", trip_req.destination, f"{trip_req.num_days} Days / {trip_req.num_nights} Nights")
+            st.metric("Destination", trip_req.destination)
         with col_r2:
-            st.metric("Total Budget", f"₹{trip_req.budget_inr:,.0f}", f"{trip_req.travelers} Traveler(s)")
+            st.metric("Duration", f"{trip_req.num_days} Day(s) / {trip_req.num_nights} Night(s)")
         with col_r3:
-            st.metric("Verified Attractions", len(final_result.attractions))
+            st.metric("Party Size", f"{trip_req.travelers} Traveler(s)")
         with col_r4:
-            st.metric("Verified Stays", len(final_result.accommodations))
+            est_total_app = min(budget.total_estimated, float(trip_req.budget_inr))
+            st.metric("Estimated Trip Cost", f"₹{est_total_app:,.0f} (Est.)", help="Realistic total estimate for party; does not exceed budget limit.")
 
         # Direct navigation helpers
         st.markdown("### 🧭 Next Steps")
@@ -246,6 +252,8 @@ if research_btn:
             st.info("👉 Check **2_Itinerary** to inspect the day-by-day activity plan.")
         with c3:
             st.info("👉 Check **3_Budget_Planner** to explore the visual expense breakdown.")
+    else:
+        st.error("No usable trip result was returned. Your request has been preserved in the form. Check the research logs above, then retry.")
 
 # Display Active Trip Quick View if already researched in this session
 if "active_research_result" in st.session_state and not research_btn:
@@ -256,7 +264,7 @@ if "active_research_result" in st.session_state and not research_btn:
     active_itn = st.session_state.get("active_itinerary", [])
     active_bgt: BudgetBreakdown = st.session_state.get("active_budget")
 
-    if active_res:
+    if active_res and active_req:
         st.markdown(f"**Destination:** {active_res.destination} | **Travelers:** {active_req.travelers} | **Budget:** ₹{active_req.budget_inr:,.0f}")
         st.write(active_res.summary)
         
@@ -266,5 +274,8 @@ if "active_research_result" in st.session_state and not research_btn:
         with c_b:
             st.metric("Accommodations", len(active_res.accommodations))
         with c_c:
-            status_badge = "✅ Within Budget" if not active_bgt.is_over_budget else "⚠️ Over Budget"
-            st.metric("Budget Status", status_badge, f"Est: ₹{active_bgt.total_estimated:,.0f}")
+            if active_bgt is not None:
+                status_badge = "✅ Within Budget" if not active_bgt.is_over_budget else "⚠️ Over Budget"
+                st.metric("Budget Status", status_badge, f"Est: ₹{active_bgt.total_estimated:,.0f}")
+            else:
+                st.metric("Budget Status", "Not calculated")

@@ -102,10 +102,11 @@ def _save_to_sqlite_cache(cache_key: str, photo: DestinationPhoto):
         pass
 
 
-def _fetch_from_wikimedia(query: str, search_context: str = "") -> Optional[DestinationPhoto]:
+def _fetch_from_wikimedia(query: str, search_context: str = "", index: int = 0) -> Optional[DestinationPhoto]:
     """
     Fetches real photograph from Wikimedia / Wikipedia PageImages API.
     Provides attribution and description under Creative Commons / Public Domain.
+    index: used to paginate results so multiple calls for the same destination return different images.
     """
     search_term = f'"{query}" {search_context}'.strip() if search_context else query.strip()
     params = urlencode({
@@ -113,7 +114,8 @@ def _fetch_from_wikimedia(query: str, search_context: str = "") -> Optional[Dest
         "generator": "search",
         "gsrsearch": search_term,
         "gsrnamespace": 0,
-        "gsrlimit": 1,
+        "gsrlimit": max(1, index + 1),
+        "gsroffset": index,
         "prop": "pageimages|info",
         "piprop": "thumbnail|original",
         "pithumbsize": 800,
@@ -157,7 +159,7 @@ def _fetch_from_wikimedia(query: str, search_context: str = "") -> Optional[Dest
     return None
 
 
-def _fetch_from_unsplash(query: str, access_key: str) -> Optional[DestinationPhoto]:
+def _fetch_from_unsplash(query: str, access_key: str, page: int = 1) -> Optional[DestinationPhoto]:
     """Fetches high-resolution photo from official Unsplash API if access key is provided."""
     if not access_key:
         return None
@@ -165,6 +167,7 @@ def _fetch_from_unsplash(query: str, access_key: str) -> Optional[DestinationPho
         "query": query,
         "orientation": "landscape",
         "per_page": 1,
+        "page": max(1, page),
         "client_id": access_key
     })
     url = f"https://api.unsplash.com/search/photos?{params}"
@@ -197,16 +200,19 @@ def _fetch_from_unsplash(query: str, access_key: str) -> Optional[DestinationPho
 def get_destination_photo(
     name: str,
     destination: str = "",
-    category: str = "attraction"
+    category: str = "attraction",
+    index: int = 0
 ) -> DestinationPhoto:
     """
     Main entrypoint to retrieve genuine destination photographs.
+    index: pass different values (0, 1, 2…) for different cards at the same destination
+           so they get different images rather than the same fallback photo.
     Checks memory cache -> SQLite persistent cache -> Unsplash API (if configured) -> Wikimedia API.
     Returns DestinationPhoto with full attribution metadata and alt text.
     """
     clean_name = name.strip()
     clean_dest = destination.strip()
-    cache_key = f"{clean_name.casefold()}|{clean_dest.casefold()}|{category.casefold()}"
+    cache_key = f"{clean_name.casefold()}|{clean_dest.casefold()}|{category.casefold()}|{index}"
 
     # 1. In-memory cache
     if cache_key in _MEMORY_IMAGE_CACHE:
@@ -224,17 +230,17 @@ def get_destination_photo(
     unsplash_key = os.getenv("UNSPLASH_ACCESS_KEY", "").strip()
     if unsplash_key:
         query = f"{clean_name} {clean_dest}".strip()
-        photo = _fetch_from_unsplash(query, unsplash_key)
+        photo = _fetch_from_unsplash(query, unsplash_key, page=index + 1)
 
     # 4. Wikimedia Commons / Wikipedia API (Default primary provider)
     if not photo or not photo.image_url:
         # First attempt: exact landmark + destination
-        photo = _fetch_from_wikimedia(clean_name, clean_dest)
+        photo = _fetch_from_wikimedia(clean_name, clean_dest, index=index)
 
     # 5. Fallback attempt: if landmark not found individually, fetch city/destination photograph
     if not photo or not photo.image_url:
         if clean_dest and clean_name.lower() != clean_dest.lower():
-            dest_photo = _fetch_from_wikimedia(clean_dest)
+            dest_photo = _fetch_from_wikimedia(clean_dest, index=index)
             if dest_photo and dest_photo.image_url:
                 photo = DestinationPhoto(
                     image_url=dest_photo.image_url,
