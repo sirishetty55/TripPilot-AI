@@ -1,0 +1,31 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# SQLite Database
+*.db
+*.sqlite3
+
+# Streamlit logs & cache
+.streamlit/
+
+# Node.js dependencies
+node_modules/
+package-lock.json
+
+# Playwright MCP logs & snapshots
+.playwright-mcp/
+
+# OS specific files
+.DS_Store
+Thumbs.db
