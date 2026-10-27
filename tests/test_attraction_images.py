@@ -66,6 +66,37 @@ class TestAttractionImages(unittest.TestCase):
 
         self.assertEqual(result.attractions[0].image_url, "")
 
+    @patch("services.image_service.urlopen", side_effect=OSError("offline"))
+    def test_electricity_and_guide_sections_are_rejected_and_replaced_with_real_sights(self, _mock_urlopen):
+        """Ensures guide meta headings (Electricity, Regions, etc.) are rejected and real tourist sights are used."""
+        request = TripRequest(
+            destination="Sweden",
+            departure_date="2026-11-01",
+            return_date="2026-11-05",
+        )
+        snapshot = "\n".join([
+            'heading "Regions"',
+            'heading "Cities"',
+            'heading "Other destinations"',
+            'heading "The year in Sweden"',
+            'heading "Electricity and utilities"',
+            'heading "Tourist information"',
+        ])
+        result = parse_with_heuristics(snapshot, request, "https://en.wikivoyage.org/wiki/Sweden")
+
+        attraction_names = [item.name for item in result.attractions]
+        # None of the generic headings should appear as attractions
+        self.assertNotIn("Regions", attraction_names)
+        self.assertNotIn("Cities", attraction_names)
+        self.assertNotIn("Other destinations", attraction_names)
+        self.assertNotIn("The year in Sweden", attraction_names)
+        self.assertNotIn("Electricity and utilities", attraction_names)
+        self.assertNotIn("Tourist information", attraction_names)
+
+        # Real tourist attractions must be returned instead
+        self.assertTrue(len(attraction_names) >= 3, "Must provide real tourist attractions")
+        self.assertTrue(any("Vasa" in name or "Gamla Stan" in name or "Palace" in name for name in attraction_names))
+
 
 if __name__ == "__main__":
     unittest.main()
