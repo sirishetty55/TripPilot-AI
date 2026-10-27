@@ -34,19 +34,17 @@ for item in trips:
     created_at = item["created_at"]
 
     with st.container():
-        st.markdown(f"""
-        <div class="travel-card">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="margin: 0; color: #0f766e;">#{trip_id} &bull; {safe_html(dest)}</h3>
-                <span class="badge-price">₹{budget:,.0f} Budget</span>
-            </div>
-            <div style="font-size: 14px; color: inherit; opacity: 0.88; margin: 8px 0;">
-                📅 <strong>Travel Dates:</strong> {safe_html(dep)} to {safe_html(ret)} &nbsp;|&nbsp; 
-                👥 <strong>Travelers:</strong> {safe_html(travelers)} &nbsp;|&nbsp;
-                🕒 <strong>Researched On:</strong> {safe_html(created_at)}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"""<div class="travel-card">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<h3 style="margin: 0; color: #0f766e;">#{trip_id} &bull; {safe_html(dest)}</h3>
+<span class="badge-price">₹{budget:,.0f} Budget</span>
+</div>
+<div style="font-size: 14px; color: inherit; opacity: 0.88; margin: 8px 0;">
+📅 <strong>Travel Dates:</strong> {safe_html(dep)} to {safe_html(ret)} &nbsp;|&nbsp; 
+👥 <strong>Travelers:</strong> {safe_html(travelers)} &nbsp;|&nbsp;
+🕒 <strong>Researched On:</strong> {safe_html(created_at)}
+</div>
+</div>""", unsafe_allow_html=True)
 
         col_b1, col_b2, col_b3 = st.columns([2, 2, 4])
         with col_b1:

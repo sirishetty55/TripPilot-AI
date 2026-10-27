@@ -42,54 +42,43 @@ if res.is_demo_data:
 best_rec = getattr(res, "best_recommendation", {}) or {}
 if best_rec:
     st.markdown("---")
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, rgba(13, 148, 136, 0.15) 0%, rgba(2, 132, 199, 0.15) 100%);
-                border: 1px solid rgba(13, 148, 136, 0.4); border-radius: 12px; padding: 18px 24px; margin-bottom: 20px;">
-        <h3 style="margin: 0 0 10px 0; color: #0d9488; display: flex; align-items: center; gap: 8px;">
-            🌟 Editor's Top Recommendations for Your Trip
-        </h3>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("""<div style="background: linear-gradient(135deg, rgba(13, 148, 136, 0.15) 0%, rgba(2, 132, 199, 0.15) 100%); border: 1px solid rgba(13, 148, 136, 0.4); border-radius: 12px; padding: 18px 24px; margin-bottom: 20px;">
+<h3 style="margin: 0 0 10px 0; color: #0d9488; display: flex; align-items: center; gap: 8px;">
+🌟 Editor's Top Recommendations for Your Trip
+</h3>
+</div>""", unsafe_allow_html=True)
 
     col_b1, col_b2, col_b3, col_b4 = st.columns(4)
     with col_b1:
         top_commute = safe_html(best_rec.get('top_commute', 'Flight / Express Train'))
-        st.markdown(f"""
-        <div style="background: rgba(128,128,128,0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #0284c7; height: 100%;">
-            <div style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase;">🚆 Best Commute</div>
-            <div style="font-size: 14px; font-weight: 600; margin-top: 4px;">{top_commute}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"""<div style="background: rgba(128,128,128,0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #0284c7; height: 100%;">
+<div style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase;">🚆 Best Commute</div>
+<div style="font-size: 14px; font-weight: 600; margin-top: 4px;">{top_commute}</div>
+</div>""", unsafe_allow_html=True)
 
     with col_b2:
         top_stay = safe_html(best_rec.get('top_stay_name', 'Verified Stay'))
         top_reason = safe_html(best_rec.get('top_stay_reason', 'Great value and location'))
-        st.markdown(f"""
-        <div style="background: rgba(128,128,128,0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #0d9488; height: 100%;">
-            <div style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase;">🏨 Recommended Stay</div>
-            <div style="font-size: 14px; font-weight: 600; margin-top: 4px;">{top_stay}</div>
-            <div style="font-size: 12px; opacity: 0.85; margin-top: 2px;">{top_reason}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"""<div style="background: rgba(128,128,128,0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #0d9488; height: 100%;">
+<div style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase;">🏨 Recommended Stay</div>
+<div style="font-size: 14px; font-weight: 600; margin-top: 4px;">{top_stay}</div>
+<div style="font-size: 12px; opacity: 0.85; margin-top: 2px;">{top_reason}</div>
+</div>""", unsafe_allow_html=True)
 
     with col_b3:
         must_visits = best_rec.get('must_visit_sights', [])
         sights_str = safe_html(", ".join(must_visits) if isinstance(must_visits, list) else str(must_visits))
-        st.markdown(f"""
-        <div style="background: rgba(128,128,128,0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #f59e0b; height: 100%;">
-            <div style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase;">🏛️ Must-Visit Sights</div>
-            <div style="font-size: 13px; font-weight: 500; margin-top: 4px;">{sights_str or 'Historic Forts & Scenic Sights'}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"""<div style="background: rgba(128,128,128,0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #f59e0b; height: 100%;">
+<div style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase;">🏛️ Must-Visit Sights</div>
+<div style="font-size: 13px; font-weight: 500; margin-top: 4px;">{sights_str or 'Historic Forts & Scenic Sights'}</div>
+</div>""", unsafe_allow_html=True)
 
     with col_b4:
         food_rec = safe_html(best_rec.get('signature_food', 'Traditional regional specialty'))
-        st.markdown(f"""
-        <div style="background: rgba(128,128,128,0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #ec4899; height: 100%;">
-            <div style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase;">🍲 Signature Food</div>
-            <div style="font-size: 13px; font-weight: 500; margin-top: 4px;">{food_rec}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"""<div style="background: rgba(128,128,128,0.1); padding: 12px; border-radius: 8px; border-left: 3px solid #ec4899; height: 100%;">
+<div style="font-size: 12px; font-weight: bold; opacity: 0.8; text-transform: uppercase;">🍲 Signature Food</div>
+<div style="font-size: 13px; font-weight: 500; margin-top: 4px;">{food_rec}</div>
+</div>""", unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -123,30 +112,24 @@ with tab_commute:
             clean_s_url = safe_url(opt.source_url)
             
             with st.container():
-                st.markdown(f"""
-                <div class="travel-card">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px;">
-                        <div>
-                            <h4 style="margin: 0; color: #0284c7; display: flex; align-items: center; gap: 8px;">
-                                <span>{safe_html(opt.icon)}</span> {safe_title}
-                            </h4>
-                            <span style="font-size: 13px; font-weight: 600; opacity: 0.85;">Mode: {safe_mode} &bull; ⏱️ Est. Duration: {safe_dur}</span>
-                        </div>
-                        <div style="text-align: right;">
-                            <span class="badge-price">{safe_cost}</span>
-                        </div>
-                    </div>
-                    <p style="margin: 10px 0 12px 0; color: inherit; opacity: 0.92;">{safe_details}</p>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-                        <a href="{clean_b_url}" target="_blank" class="btn-action btn-book">
-                            🎟️ Check Fares & Book Tickets
-                        </a>
-                        <a href="{clean_s_url}" target="_blank" class="btn-action btn-source">
-                            🔗 Official Transit Portal
-                        </a>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"""<div class="travel-card">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px;">
+<div>
+<h4 style="margin: 0; color: #0284c7; display: flex; align-items: center; gap: 8px;">
+<span>{safe_html(opt.icon)}</span> {safe_title}
+</h4>
+<span style="font-size: 13px; font-weight: 600; opacity: 0.85;">Mode: {safe_mode} &bull; ⏱️ Est. Duration: {safe_dur}</span>
+</div>
+<div style="text-align: right;">
+<span class="badge-price">{safe_cost}</span>
+</div>
+</div>
+<p style="margin: 10px 0 12px 0; color: inherit; opacity: 0.92;">{safe_details}</p>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+<a href="{clean_b_url}" target="_blank" class="btn-action btn-book">🎟️ Check Fares & Book Tickets</a>
+<a href="{clean_s_url}" target="_blank" class="btn-action btn-source">🔗 Official Transit Portal</a>
+</div>
+</div>""", unsafe_allow_html=True)
 
 # 2. Attractions Tab
 with tab_attractions:
@@ -170,34 +153,30 @@ with tab_attractions:
             clean_source = safe_url(attr.source_url)
 
             with st.container():
-                st.markdown(f"""
-                <div class="travel-card">
-                    <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
-                        {img_block}
-                        <div style="flex: 1; min-width: 260px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-                                <h4 style="margin: 0; color: #0d9488;">{safe_html(attr.name)}</h4>
-                                <div>
-                                    {badge_html}
-                                    <span class="badge-price">{safe_html(attr.price_display)}</span>
-                                </div>
-                            </div>
-                            <p style="margin: 8px 0 6px 0; color: inherit; opacity: 0.92;">{safe_html(attr.description)}</p>
-                            <div style="font-size: 13px; color: inherit; opacity: 0.85;">
-                                <strong>📍 Location:</strong> {safe_html(attr.location)} &nbsp;|&nbsp; 
-                                <strong>⏰ Timings:</strong> {safe_html(attr.opening_hours)} &nbsp;|&nbsp;
-                                <strong>🏷️ Category:</strong> {safe_html(attr.category)}
-                            </div>
-                            <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
-                                <a href="{clean_maps}" target="_blank" class="btn-action btn-maps">
-                                    📍 View on Google Maps
-                                </a>
-                                {f'<a href="{clean_source}" target="_blank" class="btn-action btn-source">🔗 Source Details</a>' if clean_source != "#" else ''}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"""<div class="travel-card">
+<div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
+{img_block}
+<div style="flex: 1; min-width: 260px;">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+<h4 style="margin: 0; color: #0d9488;">{safe_html(attr.name)}</h4>
+<div>
+{badge_html}
+<span class="badge-price">{safe_html(attr.price_display)}</span>
+</div>
+</div>
+<p style="margin: 8px 0 6px 0; color: inherit; opacity: 0.92;">{safe_html(attr.description)}</p>
+<div style="font-size: 13px; color: inherit; opacity: 0.85;">
+<strong>📍 Location:</strong> {safe_html(attr.location)} &nbsp;|&nbsp; 
+<strong>⏰ Timings:</strong> {safe_html(attr.opening_hours)} &nbsp;|&nbsp;
+<strong>🏷️ Category:</strong> {safe_html(attr.category)}
+</div>
+<div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
+<a href="{clean_maps}" target="_blank" class="btn-action btn-maps">📍 View on Google Maps</a>
+{f'<a href="{clean_source}" target="_blank" class="btn-action btn-source">🔗 Source Details</a>' if clean_source != "#" else ''}
+</div>
+</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
 # 3. Accommodation Research Tab
 with tab_stays:
@@ -223,40 +202,34 @@ with tab_stays:
             badge_html = '<span class="badge-verified">✓ LISTING RATE</span>' if stay.verified else '<span class="badge-unverified">ESTIMATED SEARCH</span>'
 
             with st.container():
-                st.markdown(f"""
-                <div class="travel-card">
-                    <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
-                        {stay_img_block}
-                        <div style="flex: 1; min-width: 260px;">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 6px;">
-                                <div>
-                                    <h4 style="margin: 0; color: #0d9488;">{safe_html(stay.property_name)}</h4>
-                                    <span style="font-size: 12px; color: inherit; opacity: 0.85;">{safe_html(stay.property_type)} &bull; 📍 {safe_html(stay.location)}</span>
-                                    {badge_html}
-                                </div>
-                                <div style="text-align: right;">
-                                    <span class="badge-price" style="font-size: 14px;">{safe_html(stay.price_display)}</span>
-                                    <div style="font-size: 12px; color: #f59e0b; font-weight: bold; margin-top: 4px;">★ {safe_html(stay.rating)}</div>
-                                </div>
-                            </div>
-                            <p style="margin: 10px 0; color: inherit; opacity: 0.92;">{safe_html(stay.description)}</p>
-                            <div style="background: rgba(128, 128, 128, 0.12); padding: 8px 12px; border-radius: 6px; font-size: 13px; border: 1px solid rgba(128, 128, 128, 0.22); margin-bottom: 10px;">
-                                <strong>Estimated Total for Party:</strong> ₹{total_stay_est:,.0f} 
-                                <span style="opacity: 0.8;">({req.num_nights} night(s) for {req.travelers} traveler(s))</span>
-                            </div>
-                            <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-                                <a href="{clean_book}" target="_blank" class="btn-action btn-book">
-                                    🏨 Book / Check Availability
-                                </a>
-                                <a href="{clean_maps}" target="_blank" class="btn-action btn-maps">
-                                    📍 View on Google Maps
-                                </a>
-                                {f'<a href="{clean_source}" target="_blank" class="btn-action btn-source">🔗 Portal</a>' if clean_source != "#" else ''}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"""<div class="travel-card">
+<div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
+{stay_img_block}
+<div style="flex: 1; min-width: 260px;">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 6px;">
+<div>
+<h4 style="margin: 0; color: #0d9488;">{safe_html(stay.property_name)}</h4>
+<span style="font-size: 12px; color: inherit; opacity: 0.85;">{safe_html(stay.property_type)} &bull; 📍 {safe_html(stay.location)}</span>
+{badge_html}
+</div>
+<div style="text-align: right;">
+<span class="badge-price" style="font-size: 14px;">{safe_html(stay.price_display)}</span>
+<div style="font-size: 12px; color: #f59e0b; font-weight: bold; margin-top: 4px;">★ {safe_html(stay.rating)}</div>
+</div>
+</div>
+<p style="margin: 10px 0; color: inherit; opacity: 0.92;">{safe_html(stay.description)}</p>
+<div style="background: rgba(128, 128, 128, 0.12); padding: 8px 12px; border-radius: 6px; font-size: 13px; border: 1px solid rgba(128, 128, 128, 0.22); margin-bottom: 10px;">
+<strong>Estimated Total for Party:</strong> ₹{total_stay_est:,.0f} 
+<span style="opacity: 0.8;">({req.num_nights} night(s) for {req.travelers} traveler(s))</span>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+<a href="{clean_book}" target="_blank" class="btn-action btn-book">🏨 Book / Check Availability</a>
+<a href="{clean_maps}" target="_blank" class="btn-action btn-maps">📍 View on Google Maps</a>
+{f'<a href="{clean_source}" target="_blank" class="btn-action btn-source">🔗 Portal</a>' if clean_source != "#" else ''}
+</div>
+</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
 # 4. Dining & Cuisine Tab
 with tab_dining:
@@ -277,27 +250,23 @@ with tab_dining:
         badge_html = '<span class="badge-verified">✓ REGIONAL SPECIALTY</span>' if f.verified else '<span class="badge-unverified">SUGGESTED DISH</span>'
 
         with st.container():
-            st.markdown(f"""
-            <div class="travel-card">
-                <div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
-                    {food_img_block}
-                    <div style="flex: 1; min-width: 250px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                            <h4 style="margin: 0; color: #0d9488;">{safe_html(f.name)}</h4>
-                            <span class="badge-price">{safe_html(f.price_range_inr)}</span>
-                        </div>
-                        <div style="font-size: 13px; color: #f59e0b; font-weight: 500; margin-top: 2px;">{safe_html(f.cuisine_type)} &bull; 📍 {safe_html(f.location)} &bull; {badge_html}</div>
-                        <p style="margin: 8px 0; color: inherit; opacity: 0.92;">{safe_html(f.description)}</p>
-                        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
-                            <a href="{clean_maps}" target="_blank" class="btn-action btn-maps">
-                                📍 Directions on Google Maps
-                            </a>
-                            {f'<a href="{clean_source}" target="_blank" class="btn-action btn-source">🔗 Food Guide</a>' if clean_source != "#" else ''}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="travel-card">
+<div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">
+{food_img_block}
+<div style="flex: 1; min-width: 250px;">
+<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+<h4 style="margin: 0; color: #0d9488;">{safe_html(f.name)}</h4>
+<span class="badge-price">{safe_html(f.price_range_inr)}</span>
+</div>
+<div style="font-size: 13px; color: #f59e0b; font-weight: 500; margin-top: 2px;">{safe_html(f.cuisine_type)} &bull; 📍 {safe_html(f.location)} &bull; {badge_html}</div>
+<p style="margin: 8px 0; color: inherit; opacity: 0.92;">{safe_html(f.description)}</p>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+<a href="{clean_maps}" target="_blank" class="btn-action btn-maps">📍 Directions on Google Maps</a>
+{f'<a href="{clean_source}" target="_blank" class="btn-action btn-source">🔗 Food Guide</a>' if clean_source != "#" else ''}
+</div>
+</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
 # 5. Neighborhoods & Practical Tips Tab
 with tab_tips:

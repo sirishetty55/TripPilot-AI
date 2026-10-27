@@ -17,6 +17,11 @@ class TestImageService(unittest.TestCase):
 
     def setUp(self):
         _MEMORY_IMAGE_CACHE.clear()
+        self.env_patcher = patch.dict("os.environ", {"UNSPLASH_ACCESS_KEY": ""})
+        self.env_patcher.start()
+
+    def tearDown(self):
+        self.env_patcher.stop()
 
     @patch("services.image_service.urlopen")
     def test_landmark_photo_retrieval(self, mock_urlopen):
