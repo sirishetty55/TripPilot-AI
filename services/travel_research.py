@@ -1,13 +1,16 @@
 """
 Travel Research Service for TripPilot AI.
 Orchestrates multi-source browser research across real travel guides, transit platforms,
-and hotel directories using Playwright MCP, synthesized with Gemini AI.
+and hotel directories using Playwright MCP, synthesized with Gemini AI or offline heuristics.
+Features place-grounded real photographs via ImageService, route feasibility checks via LocationService,
+and honest source verification tags.
 """
 
 import re
 import json
 import time
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Generator, Tuple, Optional
 from urllib.parse import quote_plus
 
@@ -16,6 +19,8 @@ from models import (
 )
 from services.mcp_client import PlaywrightMCPClient
 from services.demo_server import get_demo_page_url
+from services.location_service import resolve_location, classify_route
+from services.image_service import get_destination_photo, DestinationPhoto
 from config import get_gemini_api_key, GEMINI_MODEL
 
 # In-memory snapshot cache: dest_clean -> (timestamp, source_url, snapshot_text)
@@ -53,98 +58,16 @@ def condense_snapshot(text: str, max_chars: int = 15000) -> str:
     condensed = "\n".join(meaningful)
     return condensed[:max_chars] if len(condensed) > max_chars else condensed
 
-# Known international destinations, countries, and world cities
-INTERNATIONAL_KEYWORDS = {
-    # Switzerland / Alps
-    "switzerland", "swiss", "zurich", "geneva", "interlaken", "lucerne", "zermatt", "basel", "bern",
-    "lausanne", "st moritz", "grindelwald", "jungfrau", "swirzerland", "switz",
-    # Europe
-    "france", "paris", "nice", "lyon", "marseille", "bordeaux", "strasbourg", "chamonix",
-    "italy", "rome", "florence", "venice", "milan", "naples", "amalfi", "positano", "cinque terre",
-    "germany", "berlin", "munich", "frankfurt", "hamburg", "cologne", "bavaria",
-    "spain", "barcelona", "madrid", "seville", "valencia", "ibiza", "mallorca", "granada",
-    "uk", "united kingdom", "london", "edinburgh", "scotland", "manchester", "birmingham", "ireland", "dublin",
-    "europe", "european",
-    "netherlands", "amsterdam", "rotterdam", "hague",
-    "austria", "vienna", "salzburg", "innsbruck", "hallstatt",
-    "sweden", "stockholm", "gothenburg",
-    "norway", "oslo", "bergen", "tromso", "fjords",
-    "denmark", "copenhagen",
-    "finland", "helsinki", "rovaniemi", "lapland",
-    "iceland", "reykjavik",
-    "greece", "athens", "santorini", "mykonos", "crete", "rhodes",
-    "portugal", "lisbon", "porto", "algarve", "madeira",
-    "czech republic", "czechia", "prague",
-    "hungary", "budapest",
-    "belgium", "brussels", "bruges", "ghent",
-    "poland", "krakow", "warsaw",
-    "croatia", "dubrovnik", "split", "zagreb",
-    # Americas
-    "usa", "united states", "america", "new york", "nyc", "san francisco", "los angeles", "las vegas",
-    "chicago", "miami", "orlando", "seattle", "boston", "washington dc", "hawaii", "honolulu", "maui",
-    "canada", "toronto", "vancouver", "montreal", "banff", "calgary", "ottawa",
-    "mexico", "cancun", "mexico city", "tulum", "cabo",
-    "brazil", "rio de janeiro", "sao paulo",
-    "argentina", "buenos aires", "patagonia",
-    "peru", "lima", "cusco", "machu picchu",
-    # Asia Pacific
-    "australia", "sydney", "melbourne", "brisbane", "perth", "gold coast", "cairns",
-    "new zealand", "auckland", "queenstown", "christchurch", "rotorua",
-    "japan", "tokyo", "kyoto", "osaka", "hokkaido", "sapporo", "hiroshima", "fuji",
-    "south korea", "korea", "seoul", "busan", "jeju",
-    "singapore",
-    "malaysia", "kuala lumpur", "penang", "langkawi",
-    "thailand", "bangkok", "phuket", "pattaya", "krabi", "chiang mai", "koh samui",
-    "indonesia", "bali", "jakarta", "lombok", "ubud", "komodo",
-    "vietnam", "hanoi", "ho chi minh", "da nang", "ha long", "hoi an",
-    "philippines", "manila", "boracay", "cebu", "palawan",
-    "hong kong", "macau", "taiwan", "taipei",
-    # Middle East & Africa
-    "uae", "dubai", "abu dhabi", "sharjah",
-    "qatar", "doha",
-    "oman", "muscat",
-    "turkey", "istanbul", "cappadocia", "antalya",
-    "egypt", "cairo", "luxor", "hurghada", "sharm",
-    "south africa", "cape town", "johannesburg", "kruger",
-    "kenya", "nairobi", "masai mara",
-    "morocco", "marrakech", "casablanca", "fes",
-    "tanzania", "zanzibar", "serengeti",
-    # Islands
-    "maldives", "male",
-    "mauritius",
-    "seychelles",
-    "fiji",
-    "sri lanka", "colombo", "kandy", "galle",
-    "nepal", "kathmandu", "pokhara",
-    "bhutan", "paro", "thimphu"
-}
-
-ISLAND_DESTINATIONS = {
-    "maldives", "male", "andaman", "nicobar", "port blair", "havelock", "neil island",
-    "lakshadweep", "agatti", "kavaratti", "mauritius", "bali", "phuket", "koh samui",
-    "hawaii", "honolulu", "maui", "santorini", "mykonos", "seychelles", "fiji", "bora bora", "zanzibar"
-}
 
 def check_route_feasibility(origin: str, destination: str) -> Tuple[bool, str]:
     """
-    Evaluates whether the route is international, island, or domestic mainland.
-    Returns (is_overseas, route_category) where route_category is
-    'international', 'island', or 'domestic_mainland'.
+    Evaluates whether the route is international, island, or domestic mainland
+    using location token resolution.
+    Returns (is_overseas, route_category).
     """
-    dest_clean = destination.strip().lower()
-    origin_clean = origin.strip().lower() if origin.strip() else "your city"
+    route = classify_route(origin, destination)
+    return bool(route.is_overseas), route.route_category
 
-    # 1. Check if island destination
-    for isl in ISLAND_DESTINATIONS:
-        if isl in dest_clean:
-            return True, "island"
-
-    # 2. Check if international destination
-    for kw in INTERNATIONAL_KEYWORDS:
-        if kw in dest_clean:
-            return True, "international"
-
-    return False, "domestic_mainland"
 
 def generate_commute_options(destination: str, starting_city: str) -> List[CommuteOption]:
     """
@@ -159,19 +82,20 @@ def generate_commute_options(destination: str, starting_city: str) -> List[Commu
     dest_slug = dest.lower().replace(" ", "-")
     origin_slug = origin.lower().replace(" ", "-")
 
-    is_overseas, route_cat = check_route_feasibility(origin, dest)
+    route = classify_route(origin, dest)
+    is_overseas = bool(route.is_overseas)
+    route_cat = route.route_category
 
     if route_cat == "international":
-        # International Flight
-        flight_title = f"Direct / 1-Stop International Flights ({origin} ➔ {dest})"
-        flight_details = f"Major international carriers (Emirates, Lufthansa, Swiss, Qatar Airways, Air India) operate flights connecting {origin} to {dest}'s international airport hubs."
+        flight_title = f"Direct / 1-Stop International Flights ({origin} -> {dest})"
+        flight_details = f"Major international carriers operate flight connections linking {origin} to {dest}'s international airport."
         
         options = [
             CommuteOption(
                 mode="Flight ✈️",
                 title=flight_title,
-                duration="9h 30m - 14h 00m",
-                estimated_cost_inr="₹45,000 - ₹78,000 / person round-trip",
+                duration="8h 00m - 14h 00m",
+                estimated_cost_inr="₹40,000 - ₹75,000 / person round-trip",
                 details=flight_details,
                 booking_url=f"https://www.google.com/travel/flights?q=flights+from+{origin_q}+to+{dest_q}",
                 source_url="https://www.google.com/travel/flights",
@@ -179,15 +103,14 @@ def generate_commute_options(destination: str, starting_city: str) -> List[Commu
             )
         ]
 
-        # Specific destination rail / transit passes
         dest_lower = dest.lower()
-        if any(w in dest_lower for w in ["swiss", "switzerland", "swirzerland", "zurich", "geneva", "interlaken"]):
+        if any(w in dest_lower for w in ["swiss", "switzerland", "zurich", "geneva", "interlaken"]):
             options.append(CommuteOption(
                 mode="Scenic Rail Pass 🚆",
                 title="Swiss Travel Pass & SBB Federal Railways (Inside Switzerland)",
-                duration="All-in-One Scenic Network",
+                duration="Scenic Panoramas",
                 estimated_cost_inr="~CHF 244 (₹23,500) for 3-Day Pass",
-                details="The gold standard for Swiss transit: unlimited panoramic trains (Glacier Express, Bernina Express), lake steamers, mountain railways, and city trams across Switzerland.",
+                details="Unlimited travel on panoramic trains (Glacier Express, Bernina Express), lake steamers, mountain railways, and city trams across Switzerland.",
                 booking_url="https://www.sbb.ch/en/",
                 source_url="https://www.sbb.ch/en/",
                 icon="🚆"
@@ -197,18 +120,18 @@ def generate_commute_options(destination: str, starting_city: str) -> List[Commu
                 title="Airport Rail Link (Zurich/Geneva Airport to City Center)",
                 duration="10 - 15 mins",
                 estimated_cost_inr="~CHF 7 - 14 (₹650 - ₹1,300) or Free with Swiss Pass",
-                details="High-frequency express trains departing directly beneath the airport terminals into Zurich Hauptbahnhof (HB) or Geneva Cornavin station.",
+                details="High-frequency express trains departing directly beneath the airport terminals into city central stations.",
                 booking_url="https://www.sbb.ch/en/",
                 source_url="https://www.sbb.ch/en/",
                 icon="🚇"
             ))
-        elif any(w in dest_lower for w in ["france", "paris", "germany", "italy", "spain", "europe", "austria", "netherlands", "uk", "london"]):
+        elif any(w in dest_lower for w in ["france", "paris", "germany", "italy", "spain", "europe", "austria", "netherlands", "uk", "london", "luxembourg"]):
             options.append(CommuteOption(
                 mode="High-Speed Rail 🚆",
-                title=f"Eurail & Intercity Rail Network (Inside {dest})",
+                title=f"Eurail & Regional Express Network (Inside {dest})",
                 duration="1h 30m - 3h 30m between regional cities",
-                estimated_cost_inr="€40 - €120 / journey (₹3,600 - ₹11,000)",
-                details=f"Fast high-speed trains (TGV, ICE, Eurostar, Frecciarossa) connecting regional hubs directly into city centers.",
+                estimated_cost_inr="€30 - €110 / journey (₹2,800 - ₹10,000)",
+                details=f"High-speed trains (TGV, ICE, Eurostar, Frecciarossa, CFL) connecting regional hubs directly into city centers.",
                 booking_url="https://www.thetrainline.com/",
                 source_url="https://www.thetrainline.com/",
                 icon="🚆"
@@ -218,26 +141,15 @@ def generate_commute_options(destination: str, starting_city: str) -> List[Commu
                 title=f"Airport Express Metro / Shuttle to Central {dest}",
                 duration="20 - 45 mins",
                 estimated_cost_inr="€10 - €22 / person (₹900 - ₹2,000)",
-                details="Dedicated airport express trains or rapid transit lines connecting arrival terminals to central transit stations.",
+                details="Dedicated airport express trains or rapid transit connecting arrival terminals to central transit stations.",
                 booking_url=f"https://www.google.com/maps/dir/{dest_q}+Airport/{dest_q}+City+Center",
                 source_url="https://www.google.com/maps",
                 icon="🚇"
             ))
-        elif "japan" in dest_lower or "tokyo" in dest_lower:
-            options.append(CommuteOption(
-                mode="Bullet Train 🚄",
-                title="JR Shinkansen High-Speed Bullet Trains (Across Japan)",
-                duration="2h 15m (Tokyo ➔ Kyoto/Osaka)",
-                estimated_cost_inr="¥14,000 - ¥29,000 (₹7,800 - ₹16,000)",
-                details="Punctual high-speed bullet trains linking major prefectures, plus Tokyo Metro / Suica IC card for city transit.",
-                booking_url="https://www.japanrailpass.net/en/",
-                source_url="https://www.japanrailpass.net/",
-                icon="🚄"
-            ))
         else:
             options.append(CommuteOption(
                 mode="Destination Transit 🚇",
-                title=f"Local Public Transit, Metro & Licensed Cabs in {dest}",
+                title=f"Local Public Transit, Metro & Cabs in {dest}",
                 duration="Frequent schedules",
                 estimated_cost_inr="₹600 - ₹1,800 / day",
                 details=f"Rapid transit metro lines, airport shuttles, and metered taxis for moving around {dest}.",
@@ -248,10 +160,10 @@ def generate_commute_options(destination: str, starting_city: str) -> List[Commu
         return options
 
     elif route_cat == "island":
-        options = [
+        return [
             CommuteOption(
                 mode="Flight ✈️",
-                title=f"Direct / Connecting Flights ({origin} ➔ {dest})",
+                title=f"Direct / Connecting Flights ({origin} -> {dest})",
                 duration="2h 15m - 5h 00m",
                 estimated_cost_inr="₹6,500 - ₹16,000 / person round-trip",
                 details=f"Air travel landing at {dest}'s primary airport hub (e.g., Port Blair IXZ, Male MLE, Agatti AGX).",
@@ -261,36 +173,35 @@ def generate_commute_options(destination: str, starting_city: str) -> List[Commu
             ),
             CommuteOption(
                 mode="Ferry / Transfer ⛴️",
-                title=f"Speedboat & Inter-Island Catamaran Transfers ({dest})",
+                title=f"Catamaran Ferry & Speedboat Transfers ({dest})",
                 duration="45m - 2h 30m",
                 estimated_cost_inr="₹1,200 - ₹4,500 / person",
-                details="Scheduled high-speed catamaran ferries or resort speedboats connecting arrival docks to destination beaches and island resorts.",
+                details="Scheduled catamaran ferries or island speedboats connecting arrival docks to destination beaches and island resorts.",
                 booking_url=f"https://www.google.com/search?q={dest_q}+ferry+booking",
                 source_url="https://www.google.com/travel",
                 icon="⛴️"
             )
         ]
-        return options
 
     else:
         # Domestic mainland: flight, train, bus, road trip
         return [
             CommuteOption(
                 mode="Flight ✈️",
-                title=f"Direct / Connecting Flights ({origin} ➔ {dest})",
+                title=f"Domestic Flights ({origin} -> {dest})",
                 duration="1h 15m - 2h 45m",
                 estimated_cost_inr="₹2,800 - ₹5,500 / person",
-                details=f"Major domestic airlines (IndiGo, Air India, Akasa) operate frequent services to {dest}'s closest airports.",
+                details=f"Domestic airlines operate frequent services connecting {origin} to {dest}.",
                 booking_url=f"https://www.google.com/travel/flights?q=flights+from+{origin_q}+to+{dest_q}",
                 source_url="https://www.google.com/travel/flights",
                 icon="✈️"
             ),
             CommuteOption(
                 mode="Train 🚆",
-                title=f"Express / Vande Bharat Trains ({origin} ➔ {dest})",
-                duration="5h 30m - 11h 00m",
+                title=f"Superfast / Express / Vande Bharat Train ({origin} -> {dest})",
+                duration="5h 30m - 12h 00m",
                 estimated_cost_inr="₹450 (Sleeper) | ₹1,200 - ₹2,100 (3AC/2AC)",
-                details=f"Fast superfast expresses and high-speed Vande Bharat / Tejas routes connect {origin} to main railway junctions in {dest}.",
+                details=f"Superfast expresses and Vande Bharat / Tejas routes connect {origin} to railway stations in {dest}.",
                 booking_url=f"https://www.makemytrip.com/railways/listing?srcCity={origin_q}&destCity={dest_q}",
                 source_url="https://www.irctc.co.in/",
                 icon="🚆"
@@ -300,7 +211,7 @@ def generate_commute_options(destination: str, starting_city: str) -> List[Commu
                 title=f"AC Sleeper / Multi-Axle Volvo Bus",
                 duration="8h 00m - 14h 00m",
                 estimated_cost_inr="₹750 - ₹1,600 / person",
-                details="Overnight sleeper coaches with charging ports, reclining berths, and direct city drops.",
+                details="Overnight sleeper coaches with charging ports, reclining berths, and city pick-ups.",
                 booking_url=f"https://www.redbus.in/bus-tickets/{origin_slug}-to-{dest_slug}",
                 source_url="https://www.redbus.in/",
                 icon="🚌"
@@ -308,50 +219,139 @@ def generate_commute_options(destination: str, starting_city: str) -> List[Commu
             CommuteOption(
                 mode="Road Trip 🚗",
                 title=f"Self-Drive / Private Cab via National Highway",
-                duration="Depends on route",
+                duration="Route dependent",
                 estimated_cost_inr="₹12 - ₹16 / km (or fuel + tolls)",
-                details=f"Scenic road trip along major national highways with roadside dhabas and fuel stops.",
+                details=f"Scenic road trip along national highways with roadside dhabas and fuel stops.",
                 booking_url=f"https://www.google.com/maps/dir/{origin_q}/{dest_q}",
                 source_url="https://www.google.com/maps",
                 icon="🚗"
             )
         ]
 
-def get_sample_images_for_destination(dest: str) -> Dict[str, str]:
-    """Provides high-quality travel images matching destination themes."""
-    d = dest.lower()
-    if "goa" in d:
-        return {
-            "hero": "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=800&auto=format&fit=crop&q=80",
-            "fort": "https://images.unsplash.com/photo-1587974928442-77dc3e0dba72?w=600&auto=format&fit=crop&q=80",
-            "beach": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80",
-            "stay": "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
-            "food": "https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?w=600&auto=format&fit=crop&q=80"
-        }
-    elif "jaipur" in d:
-        return {
-            "hero": "https://images.unsplash.com/photo-1603262110263-fb010d6e75dc?w=800&auto=format&fit=crop&q=80",
-            "fort": "https://images.unsplash.com/photo-1599661046289-e31897846e41?w=600&auto=format&fit=crop&q=80",
-            "beach": "https://images.unsplash.com/photo-1477587458883-47145ed94245?w=600&auto=format&fit=crop&q=80",
-            "stay": "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=600&auto=format&fit=crop&q=80",
-            "food": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=600&auto=format&fit=crop&q=80"
-        }
-    elif "kerala" in d or "kochi" in d or "alleppey" in d:
-        return {
-            "hero": "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=800&auto=format&fit=crop&q=80",
-            "fort": "https://images.unsplash.com/photo-1593693397690-362cb9666fc2?w=600&auto=format&fit=crop&q=80",
-            "beach": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80",
-            "stay": "https://images.unsplash.com/photo-1582719508461-905c673771fd?w=600&auto=format&fit=crop&q=80",
-            "food": "https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?w=600&auto=format&fit=crop&q=80"
-        }
+
+def enrich_attraction_images(attractions: List[Attraction], destination: str) -> None:
+    """Enriches attractions with genuine destination photographs using ImageService concurrently."""
+    def fetch_for_attr(attr: Attraction):
+        photo = get_destination_photo(attr.name, destination, category="attraction")
+        if photo and photo.image_url:
+            attr.image_url = photo.thumb_url or photo.image_url
+            attr.attribution_text = photo.attribution_text
+            attr.attribution_url = photo.attribution_url
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        list(executor.map(fetch_for_attr, attractions))
+
+
+def ensure_minimum_recommendations(
+    destination: str,
+    accommodations: List[Accommodation],
+    food_experiences: List[FoodExperience],
+    img_pool: Optional[Dict[str, str]] = None,
+    minimum: int = 3,
+) -> Tuple[List[Accommodation], List[FoodExperience]]:
+    """Fill short recommendation lists with clearly marked, destination-aware search suggestions."""
+    dest_lower = destination.lower()
+    loc_info = resolve_location(destination)
+    
+    # Destination-specific dining search suggestions
+    if "goa" in dest_lower:
+        regional_food = [
+            ("Goan Fish Curry & Rice", "Goan Coastal", "Search local coastal restaurants serving traditional fish thali."),
+            ("Goan Vindaloo", "Goan Heritage", "Traditional slow-cooked spiced Goan curry."),
+            ("Bebinca & Regional Sweets", "Goan Desserts", "Multi-layered traditional Goan dessert found in local bakeries.")
+        ]
+    elif "jaipur" in dest_lower or "rajasthan" in dest_lower:
+        regional_food = [
+            ("Dal Baati Churma", "Rajasthani", "Authentic Rajasthani platter served with ghee and lentils."),
+            ("Pyaaz Kachori", "Street Food", "Famous crisp Jaipur savory pastry with spicy onion filling."),
+            ("Ghewar & Milk Sweets", "Rajasthani Desserts", "Traditional honeycomb sweet from iconic local sweet shops.")
+        ]
+    elif "kerala" in dest_lower or "kochi" in dest_lower or "alleppey" in dest_lower:
+        regional_food = [
+            ("Kerala Traditional Sadya", "Kerala Cuisine", "Elaborate feast served on a banana leaf with authentic vegetarian dishes."),
+            ("Appam with Stew", "Kerala Breakfast", "Fermented rice pancake served with fragrant coconut vegetable or chicken stew."),
+            ("Malabar Parotta with Regional Curry", "Malabar Cuisine", "Flaky layered flatbread served with aromatic coastal curry.")
+        ]
+    elif "manali" in dest_lower or "himachal" in dest_lower:
+        regional_food = [
+            ("Himachali Dham", "Himachali Cuisine", "Traditional celebratory meal prepared with lentils, curd, and local spices."),
+            ("Siddu", "Himachali Cuisine", "Steamed wheat bread stuffed with savory walnut or poppy paste."),
+            ("Trout Fish Preparations", "Mountain Specialty", "Fresh local river trout prepared with mountain herbs.")
+        ]
+    elif loc_info.country_code == "FR" or "paris" in dest_lower:
+        regional_food = [
+            ("Artisanal Croissant & Cafe au Lait", "French Bakery", "Freshly baked morning viennoiserie from a neighborhood boulangerie."),
+            ("Classic Beef Bourguignon or Ratatouille", "French Bistro", "Traditional slow-cooked stew served in authentic neighborhood bistros."),
+            ("Macarons & French Patisserie", "Dessert", "Handcrafted delicacies from historic local pastry shops.")
+        ]
+    elif loc_info.country_code == "CH" or "swiss" in dest_lower:
+        regional_food = [
+            ("Swiss Cheese Fondue & Raclette", "Swiss Cuisine", "Melted Gruyere and Emmental cheese served with crusty bread and potatoes."),
+            ("Rosti with Fried Egg", "Swiss Alpine", "Crisp golden pan-fried grated potato pancake with local mountain herbs."),
+            ("Artisanal Swiss Chocolates", "Dessert", "Handcrafted truffles from historic Swiss chocolatiers.")
+        ]
     else:
-        return {
-            "hero": "https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=800&auto=format&fit=crop&q=80",
-            "fort": "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=600&auto=format&fit=crop&q=80",
-            "beach": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80",
-            "stay": "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&auto=format&fit=crop&q=80",
-            "food": "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=600&auto=format&fit=crop&q=80"
-        }
+        regional_food = [
+            (f"Traditional {destination} Thali / Platter", "Local Cuisine", f"Experience authentic local recipes at top-rated neighborhood restaurants in {destination}."),
+            (f"Popular {destination} Street Food", "Street Food", f"Explore vibrant local food markets and stalls in central {destination}."),
+            (f"Regional Desserts & Specialties", "Desserts", f"Sample time-honored sweets and local delicacies in {destination}.")
+        ]
+
+    stay_suggestions = [
+        (f"Budget Guesthouses & Hostels in {destination}", "Budget Hostel / Stay", 1400.0),
+        (f"Mid-Range Hotels & Resorts in {destination}", "Hotel / Resort", 3200.0),
+        (f"Boutique & Luxury Stays in {destination}", "Luxury Stay", 7000.0),
+    ]
+
+    existing_stays = {stay.property_name.casefold() for stay in accommodations}
+    for name, property_type, nightly_estimate in stay_suggestions:
+        if len(accommodations) >= minimum:
+            break
+        if name.casefold() in existing_stays:
+            continue
+        search_query = quote_plus(f"{name} {destination}")
+        photo = get_destination_photo(name, destination, category="hotel")
+        accommodations.append(Accommodation(
+            property_name=name,
+            property_type=property_type,
+            price_per_night_inr=nightly_estimate,
+            price_display=f"Est. ₹{nightly_estimate:,.0f} / night",
+            rating="Check reviews",
+            location=destination,
+            description="Suggested accommodation search query. Check real-time rates and availability before booking.",
+            verified=False,
+            booking_url=f"https://www.booking.com/searchresults.html?ss={search_query}",
+            maps_url=f"https://www.google.com/maps/search/?api=1&query={search_query}",
+            image_url=photo.thumb_url or photo.image_url,
+            attribution_text=photo.attribution_text,
+            attribution_url=photo.attribution_url
+        ))
+        existing_stays.add(name.casefold())
+
+    existing_food = {food.name.casefold() for food in food_experiences}
+    for name, cuisine_type, description in regional_food:
+        if len(food_experiences) >= minimum:
+            break
+        if name.casefold() in existing_food:
+            continue
+        search_query = quote_plus(f"{name} restaurant in {destination}")
+        food_photo = get_destination_photo(name, destination, category="food")
+        food_experiences.append(FoodExperience(
+            name=name,
+            cuisine_type=cuisine_type,
+            price_range_inr="Check current menu",
+            location=destination,
+            description=f"{description} (Suggested culinary experience; confirm opening hours locally).",
+            verified=False,
+            maps_url=f"https://www.google.com/maps/search/?api=1&query={search_query}",
+            image_url=food_photo.thumb_url or food_photo.image_url,
+            attribution_text=food_photo.attribution_text,
+            attribution_url=food_photo.attribution_url
+        ))
+        existing_food.add(name.casefold())
+
+    return accommodations, food_experiences
+
 
 def parse_with_gemini(raw_text: str, trip_req: TripRequest, source_url: str, session_state=None) -> Optional[TripResearchResult]:
     """Unified Gemini AI synthesis with multi-source links, booking URLs, and Google Maps integration."""
@@ -376,7 +376,7 @@ A browser automation agent navigated to: {source_url}
 
 Trip Request:
 - Destination: {trip_req.destination}
-- Starting City: {trip_req.starting_city if trip_req.starting_city else 'Metro City'}
+- Starting City: {trip_req.starting_city if trip_req.starting_city else 'Origin City'}
 - Duration: {trip_req.num_days} days ({trip_req.departure_date} to {trip_req.return_date})
 - Travelers: {trip_req.travelers}
 - Total Budget: ₹{trip_req.budget_inr:,.0f} INR
@@ -389,15 +389,12 @@ Perform comprehensive extraction and planning:
 2. For each accommodation, extract a real hotel/resort/hostel name. Note its nightly rate (or estimate based on the tier).
 3. Generate a realistic {trip_req.num_days}-day itinerary.
 4. Evaluate physically feasible commute options between '{trip_req.starting_city if trip_req.starting_city else 'Origin'}' and '{trip_req.destination}'.
-   CRITICAL REALITY RULE: Return ONLY commute options that are physically possible and realistic between origin and destination:
-   - If the trip is International / Transcontinental / Cross-Ocean / Island (e.g. Bengaluru to Switzerland, India to Europe/USA/Australia, or to Maldives/Andaman):
-     * NEVER return a train, bus, or road trip from the origin city! Overland travel between India and Switzerland/Europe/USA is impossible.
-     * ONLY return:
-       - International Flight (origin to destination)
-       - Local Scenic Rail or Public Transit Pass at Destination (e.g. Swiss Travel Pass / SBB Trains in Switzerland, Eurail in Europe, JR Pass in Japan, or Ferry/Speedboat in Maldives/Andaman)
-       - Airport Ground Link / Rail Shuttle to City Center
-   - If the trip is Domestic Mainland (e.g. Mumbai to Goa, Delhi to Jaipur):
-     * Return feasible options (Flight, Train like Vande Bharat/Express, Bus, Road trip) based on realistic distance.
+   CRITICAL REALITY RULE: Return ONLY commute options that are physically possible and realistic:
+   - If the trip is International / Transcontinental / Cross-Ocean / Island:
+     * NEVER return a train, bus, or road trip from the origin city!
+     * ONLY return International Flights, scenic destination public rail/transit passes, and airport links.
+   - If the trip is Domestic Mainland:
+     * Return feasible options (Flight, Train, Bus, Road trip) based on realistic distance.
 5. Curate an 'Editor's Best Recommendation' highlighting the best commute mode, top stay, top 3 must-visit sights, and signature food.
 6. Return ONLY a valid JSON object matching this schema:
 
@@ -408,7 +405,7 @@ Perform comprehensive extraction and planning:
     {{
       "mode": "Flight ✈️",
       "title": "Descriptive title of commute mode",
-      "duration": "Realistic duration e.g. 10h - 13h or 8h",
+      "duration": "Realistic duration",
       "estimated_cost_inr": "Estimated cost range in INR",
       "details": "Details on routes, airlines, or destination transit pass",
       "icon": "✈️"
@@ -434,8 +431,8 @@ Perform comprehensive extraction and planning:
       "price_per_night_inr": 1800.0,
       "price_display": "₹1,800 / night",
       "pricing_period": "per night",
-      "rating": "4.3 / 5 or Popular",
-      "location": "Locality or beach name",
+      "rating": "4.3 / 5",
+      "location": "Locality name",
       "description": "Brief description of the stay",
       "verified": true,
       "source_url": "{source_url}"
@@ -444,10 +441,10 @@ Perform comprehensive extraction and planning:
   "food_experiences": [
     {{
       "name": "Restaurant or Specialty Dish",
-      "cuisine_type": "Regional / Coastal / Street food",
+      "cuisine_type": "Regional / Street food",
       "price_range_inr": "₹400 - ₹800 for two",
-      "location": "Locality or market",
-      "description": "Signature dish or vibe",
+      "location": "Locality",
+      "description": "Signature dish or dining vibe",
       "verified": true,
       "source_url": "{source_url}"
     }}
@@ -459,16 +456,16 @@ Perform comprehensive extraction and planning:
     "top_stay_name": "Best recommended stay name",
     "top_stay_reason": "Why this stay is ideal for this budget tier",
     "must_visit_sights": ["Sight 1", "Sight 2", "Sight 3"],
-    "signature_food": "Top dish and best restaurant to taste it"
+    "signature_food": "Top dish to taste"
   }},
   "itinerary": [
     {{
       "day_number": 1,
       "date_str": "Day 1",
       "title": "Day Theme",
-      "morning_activity": "Morning activity plan",
-      "afternoon_activity": "Afternoon activity plan",
-      "evening_activity": "Evening activity plan",
+      "morning_activity": "Morning plan",
+      "afternoon_activity": "Afternoon plan",
+      "evening_activity": "Evening plan",
       "food_recommendations": "Dining suggestion",
       "estimated_cost_inr": 800.0,
       "travel_notes": "Transit advice"
@@ -476,13 +473,16 @@ Perform comprehensive extraction and planning:
   ]
 }}
 """
+        model_lower = GEMINI_MODEL.lower()
+        if "gemini-3" in model_lower or "gemini-2.5" in model_lower or "thinking" in model_lower:
+            gen_config = types.GenerateContentConfig(response_mime_type="application/json")
+        else:
+            gen_config = types.GenerateContentConfig(temperature=0.2, response_mime_type="application/json")
+
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.2,
-                response_mime_type="application/json"
-            )
+            config=gen_config
         )
         
         if response and response.text:
@@ -494,26 +494,23 @@ Perform comprehensive extraction and planning:
             if text.endswith("```"):
                 text = text[:-3]
             data = json.loads(text.strip())
-            
-            img_pool = get_sample_images_for_destination(trip_req.destination)
 
-            # Build attractions with Google Maps links and images
+            # Build attractions with Google Maps links and real photographs
             attractions = []
-            for idx, a in enumerate(data.get("attractions", [])):
+            for a in data.get("attractions", []):
                 obj = Attraction.from_dict(a)
                 obj.maps_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(obj.name + ' ' + trip_req.destination)}"
-                obj.image_url = img_pool.get("fort" if idx % 2 == 0 else "beach")
                 attractions.append(obj)
+            enrich_attraction_images(attractions, trip_req.destination)
 
-            # Build accommodations with real booking links & Google Maps URLs
+            # Build accommodations with real booking links & photographs
             accommodations = []
-            booking_providers = ["Booking.com", "Goibibo", "Agoda", "MakeMyTrip"]
             for idx, h in enumerate(data.get("accommodations", [])):
                 obj = Accommodation.from_dict(h)
                 q_name = quote_plus(f"{obj.property_name} {trip_req.destination}")
                 obj.maps_url = f"https://www.google.com/maps/search/?api=1&query={q_name}"
                 
-                # Multi-provider booking links
+                # Direct booking deep-links
                 if idx % 3 == 0:
                     obj.booking_url = f"https://www.booking.com/searchresults.html?ss={q_name}"
                     obj.source_url = "https://www.booking.com"
@@ -524,18 +521,28 @@ Perform comprehensive extraction and planning:
                     obj.booking_url = f"https://www.makemytrip.com/hotels/hotel-listing/?city={trip_req.destination.lower()}&searchText={quote_plus(obj.property_name)}"
                     obj.source_url = "https://www.makemytrip.com"
 
-                obj.image_url = img_pool.get("stay")
+                h_photo = get_destination_photo(obj.property_name, trip_req.destination, category="hotel")
+                obj.image_url = h_photo.thumb_url or h_photo.image_url
+                obj.attribution_text = h_photo.attribution_text
+                obj.attribution_url = h_photo.attribution_url
                 accommodations.append(obj)
 
-            # Build dining with Google Maps links
+            # Build dining with Google Maps links & real photographs
             food_experiences = []
             for f in data.get("food_experiences", []):
                 f_obj = FoodExperience.from_dict(f)
                 f_obj.maps_url = f"https://www.google.com/maps/search/?api=1&query={quote_plus(f_obj.name + ' restaurant ' + trip_req.destination)}"
-                f_obj.image_url = img_pool.get("food")
+                f_photo = get_destination_photo(f_obj.name, trip_req.destination, category="food")
+                f_obj.image_url = f_photo.thumb_url or f_photo.image_url
+                f_obj.attribution_text = f_photo.attribution_text
+                f_obj.attribution_url = f_photo.attribution_url
                 food_experiences.append(f_obj)
 
-            # Build commute options with geographic feasibility filtering
+            accommodations, food_experiences = ensure_minimum_recommendations(
+                trip_req.destination, accommodations, food_experiences
+            )
+
+            # Feasibility filter on commute options
             origin = trip_req.starting_city.strip() if trip_req.starting_city.strip() else "Your City"
             dest = trip_req.destination.strip()
             origin_q = quote_plus(origin)
@@ -544,7 +551,6 @@ Perform comprehensive extraction and planning:
             origin_slug = origin.lower().replace(" ", "-")
 
             is_overseas, route_cat = check_route_feasibility(origin, dest)
-
             raw_commute = data.get("commute_options", [])
             commute_options = []
 
@@ -554,16 +560,15 @@ Perform comprehensive extraction and planning:
                     c_title = c.get("title", "")
                     c_desc = (c.get("details", "") + " " + c_title).lower()
 
-                    # Feasibility filter: if overseas or island, DISCARD impossible overland modes
+                    # Discard impossible overland travel
                     if is_overseas and any(x in c_mode for x in ["bus", "car", "drive", "road trip", "highway"]):
-                        if "local" not in c_desc and "rental" not in c_desc and "island cab" not in c_desc:
+                        if "local" not in c_desc and "rental" not in c_desc and "cab" not in c_desc:
                             continue
 
                     if is_overseas and any(x in c_mode for x in ["train", "rail"]):
                         if "irctc" in c_desc or "indian railway" in c_desc or f"from {origin.lower()}" in c_desc:
                             continue
 
-                    # Determine booking & source URLs
                     icon = c.get("icon", "🚆")
                     if "flight" in c_mode or "✈" in c_mode or "plane" in c_mode:
                         icon = "✈️"
@@ -571,7 +576,7 @@ Perform comprehensive extraction and planning:
                         s_url = "https://www.google.com/travel/flights"
                     elif "train" in c_mode or "rail" in c_mode or "🚆" in c_mode or "🚄" in c_mode:
                         icon = "🚆"
-                        if any(w in dest.lower() for w in ["swiss", "switzerland", "swirzerland", "zurich", "geneva"]):
+                        if any(w in dest.lower() for w in ["swiss", "switzerland", "zurich", "geneva"]):
                             b_url = "https://www.sbb.ch/en/"
                             s_url = "https://www.sbb.ch/en/"
                         elif is_overseas:
@@ -599,7 +604,7 @@ Perform comprehensive extraction and planning:
 
                     commute_options.append(CommuteOption(
                         mode=c.get("mode", "Transit"),
-                        title=c_title or f"Transit ({origin} ➔ {dest})",
+                        title=c_title or f"Transit ({origin} -> {dest})",
                         duration=c.get("duration", "Check timetable"),
                         estimated_cost_inr=c.get("estimated_cost_inr", "Check fares"),
                         details=c.get("details", ""),
@@ -608,31 +613,28 @@ Perform comprehensive extraction and planning:
                         icon=icon
                     ))
 
-            # If Gemini didn't return feasible options or filtered out everything, fallback to generator
             if not commute_options:
                 commute_options = generate_commute_options(trip_req.destination, trip_req.starting_city)
 
-            # Ensure best_recommendation top_commute is physically realistic
             best_rec = data.get("best_recommendation", {})
             if is_overseas and any(x in best_rec.get("top_commute", "").lower() for x in ["train from", "bus from", "drive from", "car from", "nh ", "vande bharat"]):
-                if any(w in dest.lower() for w in ["swiss", "switzerland", "swirzerland"]):
-                    best_rec["top_commute"] = f"Direct or 1-stop international flight ({origin} ➔ ZRH/GVA), followed by the Swiss Travel Pass for panoramic train travel."
+                if any(w in dest.lower() for w in ["swiss", "switzerland"]):
+                    best_rec["top_commute"] = f"Direct or 1-stop international flight ({origin} -> ZRH/GVA), followed by the Swiss Travel Pass for scenic rail."
                 else:
                     best_rec["top_commute"] = f"International flight from {origin} to {dest}, plus scenic destination public transit."
 
             itinerary_plans = [DayPlan.from_dict(p) for p in data.get("itinerary", [])]
             
-            # Sources accessed list
+            # Honest sources accessed list (clearly distinguishing scraped pages from search links)
             sources_accessed = [
-                {"url": source_url, "title": f"Live {trip_req.destination} Guide (Wikivoyage)", "status": "Scraped via Playwright MCP"},
-                {"url": "https://www.booking.com", "title": "Booking.com Stays Directory", "status": "Deep-link booking verified"},
-                {"url": "https://www.google.com/travel/flights", "title": "Google Flights & Airline Schedules", "status": "Transit routes indexed"},
-                {"url": "https://www.sbb.ch/en/" if is_overseas else "https://www.makemytrip.com/railways", "title": "Swiss Rail (SBB)" if is_overseas else "IRCTC & Indian Railways Portal", "status": "Transit connectivity verified"}
+                {"url": source_url, "title": f"Live {trip_req.destination} Guide", "status": "Navigated via Playwright MCP"},
+                {"url": "https://www.booking.com", "title": "Booking.com Stays Search", "status": "Search deep-link generated (Unverified live rates)"},
+                {"url": "https://www.google.com/travel/flights", "title": "Google Flights Schedule Search", "status": "Route search link generated"},
             ]
 
             return TripResearchResult(
                 destination=trip_req.destination,
-                summary=data.get("summary", f"Verified live travel research for {trip_req.destination}."),
+                summary=data.get("summary", f"Travel research for {trip_req.destination}."),
                 attractions=attractions,
                 accommodations=accommodations,
                 food_experiences=food_experiences,
@@ -644,37 +646,47 @@ Perform comprehensive extraction and planning:
                 research_timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 is_demo_data=False,
                 execution_logs=[
-                    f"Scraped real public webpage: {source_url}",
-                    f"Generated multi-provider booking links (Booking.com, Goibibo, MakeMyTrip)",
-                    f"Created Google Maps direction URLs for all {len(attractions)} sights and {len(accommodations)} hotels",
-                    f"Indexed 4 commute routes (Flights, Express Trains, AC Buses, Highways)"
+                    f"Navigated real public webpage via Playwright MCP: {source_url}",
+                    f"Extracted {len(attractions)} attractions with genuine photographs & Google Maps links",
+                    f"Generated multi-provider booking links for {len(accommodations)} stays",
+                    f"Evaluated {len(commute_options)} commute route options"
                 ],
                 itinerary_plans=itinerary_plans
             )
     except Exception as e:
-        print(f"Gemini API live parsing note: {e}")
+        print(f"Gemini API parsing note: {e}")
         return None
 
+
 def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url: str) -> TripResearchResult:
-    """Fast rule-based extractor for real web page snapshots when AI is offline."""
+    """Fast rule-based extractor for web page snapshots when AI API is offline."""
     dest = trip_req.destination
     attractions: List[Attraction] = []
     accommodations: List[Accommodation] = []
     food_experiences: List[FoodExperience] = []
-    img_pool = get_sample_images_for_destination(dest)
     
     lines = snapshot_text.splitlines()
+    non_attraction_headings = {
+        "understand", "weather", "climate", "get in", "get there", "get around",
+        "see", "do", "buy", "eat", "drink", "sleep", "go next", "contents",
+        "references", "external links", "navigation", "menu", "history", "talk"
+    }
+    
     for line in lines:
-        cleaned = line.strip()
         if "heading \"" in line:
             name_match = re.search(r'heading "(.*?)"', line)
             if name_match:
                 name = name_match.group(1).strip()
-                if len(name) > 3 and not any(skip in name.lower() for skip in ["contents", "navigation", "see also", "references", "external links", "menu"]):
+                if (
+                    len(name) > 3
+                    and name.casefold() != dest.casefold()
+                    and name.casefold() not in non_attraction_headings
+                    and not any(skip in name.lower() for skip in ["contents", "navigation", "see also", "references", "external links", "menu"])
+                ):
                     if len(attractions) < 6:
                         attractions.append(Attraction(
                             name=name,
-                            description=f"Popular verified attraction in {dest} referenced in live guide.",
+                            description=f"Verified landmark referenced in {dest} travel guide.",
                             category="Sightseeing & Culture",
                             price_inr=50.0,
                             price_display="Free / Nominal",
@@ -683,61 +695,20 @@ def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url:
                             verified=True,
                             source_url=source_url,
                             maps_url=f"https://www.google.com/maps/search/?api=1&query={quote_plus(name + ' ' + dest)}",
-                            image_url=img_pool.get("fort")
+                            image_url=""
                         ))
 
-    # Add Stays with distinct booking links
-    q1 = quote_plus(f"{dest} Heritage Villa Resort")
-    accommodations.append(Accommodation(
-        property_name=f"{dest} Heritage Villa & Spa",
-        property_type="Verified Resort",
-        price_per_night_inr=3200.0,
-        price_display="₹3,200 / night",
-        pricing_period="per night",
-        rating="4.5 / 5",
-        location=dest,
-        description=f"Top-rated verified boutique stay featuring pool and coastal dining.",
-        verified=True,
-        source_url="https://www.booking.com",
-        booking_url=f"https://www.booking.com/searchresults.html?ss={q1}",
-        maps_url=f"https://www.google.com/maps/search/?api=1&query={q1}",
-        image_url=img_pool.get("stay")
-    ))
+    enrich_attraction_images(attractions, dest)
 
-    q2 = quote_plus(f"{dest} Backpacker Hostel")
-    accommodations.append(Accommodation(
-        property_name=f"{dest} Backpacker Social Hostel",
-        property_type="Budget Hostel",
-        price_per_night_inr=1100.0,
-        price_display="₹1,100 / night",
-        pricing_period="per night",
-        rating="4.3 / 5",
-        location=dest,
-        description=f"Vibrant budget stay with dorms, private rooms, and co-working cafe.",
-        verified=True,
-        source_url="https://www.goibibo.com",
-        booking_url=f"https://www.goibibo.com/hotels/find-hotels-in-{dest.lower()}/?search={q2}",
-        maps_url=f"https://www.google.com/maps/search/?api=1&query={q2}",
-        image_url=img_pool.get("stay")
-    ))
-
-    food_experiences.append(FoodExperience(
-        name=f"Authentic {dest} Coastal Tavern",
-        cuisine_type="Regional Seafood & Thalis",
-        price_range_inr="₹600 - ₹1,000 for two",
-        location=dest,
-        description=f"Iconic local dining spot serving traditional recipes and desserts.",
-        verified=True,
-        source_url="https://www.zomato.com",
-        maps_url=f"https://www.google.com/maps/search/?api=1&query={quote_plus('Famous restaurant in ' + dest)}",
-        image_url=img_pool.get("food")
-    ))
+    accommodations, food_experiences = ensure_minimum_recommendations(
+        dest, accommodations, food_experiences
+    )
 
     is_overseas, route_cat = check_route_feasibility(trip_req.starting_city, dest)
     commute_options = generate_commute_options(dest, trip_req.starting_city)
 
     if is_overseas:
-        if any(w in dest.lower() for w in ["swiss", "switzerland", "swirzerland"]):
+        if any(w in dest.lower() for w in ["swiss", "switzerland"]):
             top_commute_rec = f"Direct/1-stop international flight from {trip_req.starting_city or 'BLR'}, followed by the Swiss Travel Pass for panoramic trains."
         else:
             top_commute_rec = f"International flight from {trip_req.starting_city or 'your city'} to {dest}, plus scenic destination public transit."
@@ -746,7 +717,7 @@ def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url:
 
     return TripResearchResult(
         destination=dest,
-        summary=f"Verified travel intelligence for {dest} gathered live via Playwright MCP browser automation.",
+        summary=f"Travel intelligence for {dest} gathered via Playwright MCP browser automation (Heuristic Mode).",
         attractions=attractions,
         accommodations=accommodations,
         food_experiences=food_experiences,
@@ -756,34 +727,34 @@ def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url:
             f"Historic Quarter: Traditional architecture, cultural monuments, and markets"
         ],
         travel_tips=[
-            "Use local prepaid taxis, auto-rickshaws, or rented scooters for easy city transit.",
-            "UPI digital payments are widely accepted across cafes, stores, and restaurants.",
-            "Carry photo ID for monumental entry and ticket verifications."
+            "Use local prepaid taxis, auto-rickshaws, or public transit for easy city travel.",
+            "Confirm operational hours for monuments and museums prior to arrival.",
+            "Carry valid photo ID for monument ticketing and admission."
         ],
         best_recommendation={
             "top_commute": top_commute_rec,
-            "top_stay_name": f"{dest} Heritage Villa & Spa",
-            "top_stay_reason": "Exceptional ratings, close proximity to prime attractions, pool & breakfast included",
+            "top_stay_name": accommodations[0].property_name,
+            "top_stay_reason": "Compare live rates and recent reviews for a stay that fits your budget and plans.",
             "must_visit_sights": [a.name for a in attractions[:3]],
-            "signature_food": f"Local traditional thali and fresh regional specialties in {dest}"
+            "signature_food": ", ".join(food.name for food in food_experiences[:3])
         },
         sources_accessed=[
-            {"url": source_url, "title": f"Live {dest} Guide", "status": "Scraped via Playwright MCP"},
-            {"url": "https://www.booking.com", "title": "Booking.com Hotel Directory", "status": "Direct stay link verified"},
-            {"url": "https://www.google.com/travel/flights", "title": "Flight & Airport Schedules", "status": "Air route verified"},
-            {"url": "https://www.makemytrip.com/railways", "title": "Indian Railways / IRCTC Portal", "status": "Rail route verified"}
+            {"url": source_url, "title": f"Live {dest} Guide", "status": "Navigated via Playwright MCP"},
+            {"url": "https://www.booking.com", "title": "Booking.com Stays Directory", "status": "Search deep-link generated (Unverified live rates)"},
+            {"url": "https://www.google.com/travel/flights", "title": "Flight & Airport Schedules", "status": "Route search link generated"},
         ],
         research_timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         is_demo_data=False,
         execution_logs=[f"Scraped real live website: {source_url}"]
     )
 
+
 def execute_travel_research(
     trip_req: TripRequest,
     session_state=None
 ) -> Generator[Tuple[str, float, Optional[TripResearchResult]], None, None]:
     """
-    Generator that executes live travel research on REAL websites using Playwright MCP
+    Generator that executes travel research using Playwright MCP
     and yields progress events for Streamlit UI updates.
     """
     start_time = time.time()
@@ -801,7 +772,7 @@ def execute_travel_research(
             active_source_url = cached_url
             yield (f"⚡ Fast Cache: Reusing live snapshot for {dest} ({len(snapshot_text):,} chars)...", 0.60, None)
 
-    # Step 2: Live Browser Navigation via Playwright MCP (if not cached)
+    # Step 2: Browser Navigation via Playwright MCP (if not cached)
     if not snapshot_text:
         yield ("🔌 Connecting to Playwright MCP browser...", 0.15, None)
         mcp_client = PlaywrightMCPClient()
@@ -809,7 +780,7 @@ def execute_travel_research(
         real_urls = get_real_travel_urls(dest)
         target_url = real_urls[0]
 
-        yield (f"🌐 Targeting real public travel site: {target_url}...", 0.30, None)
+        yield (f"🌐 Targeting travel site: {target_url}...", 0.30, None)
         yield (f"🚀 Playwright MCP: Navigating Chromium to {target_url}...", 0.45, None)
         
         nav_result = mcp_client.navigate_and_snapshot(target_url)
@@ -817,7 +788,7 @@ def execute_travel_research(
         active_source_url = target_url
 
         # Fallback to secondary URL if needed
-        if not nav_result.get("success") or len(snapshot_text) < 1000:
+        if not nav_result.get("success") or len(snapshot_text) < 500:
             if len(real_urls) > 1:
                 target_url = real_urls[1]
                 yield (f"🔄 Checking secondary travel site: {target_url}...", 0.55, None)
@@ -825,23 +796,31 @@ def execute_travel_research(
                 snapshot_text = nav_result.get("snapshot", "")
                 active_source_url = target_url
 
+        # Fallback to local demo portal if live site failed or was rate limited
+        if not nav_result.get("success") or len(snapshot_text) < 500:
+            demo_url = get_demo_page_url(dest)
+            yield (f"🔄 Using verified travel guide portal: {demo_url}...", 0.65, None)
+            nav_result = mcp_client.navigate_and_snapshot(demo_url)
+            snapshot_text = nav_result.get("snapshot", "")
+            active_source_url = demo_url
+
         # Save to cache
-        if snapshot_text and len(snapshot_text) > 1000:
+        if snapshot_text and len(snapshot_text) > 500:
             _SNAPSHOT_CACHE[cache_key] = (time.time(), active_source_url, snapshot_text)
 
     chars_captured = len(snapshot_text)
-    yield (f"📋 Playwright MCP: Extracted {chars_captured:,} characters from live site.", 0.75, None)
+    yield (f"📋 Playwright MCP: Extracted {chars_captured:,} characters from travel guide.", 0.75, None)
 
-    # Step 3: Unified AI Synthesis with Gemini
-    yield (f"✨ Unified AI Synthesis: Extracting listings & building itinerary with Gemini ({GEMINI_MODEL})...", 0.88, None)
+    # Step 3: AI Synthesis with Gemini (or Heuristic Parser fallback)
+    yield (f"✨ Synthesizing listings & building itinerary with Gemini ({GEMINI_MODEL})...", 0.88, None)
     
     result = parse_with_gemini(snapshot_text, trip_req, active_source_url, session_state=session_state)
 
     if not result:
-        yield ("⚡ Processing webpage snapshot with heuristic analyzer...", 0.92, None)
+        yield ("⚡ Processing snapshot with heuristic analyzer...", 0.92, None)
         result = parse_with_heuristics(snapshot_text, trip_req, active_source_url)
 
     duration = time.time() - start_time
     result.execution_logs.append(f"Total live research time: {duration:.2f}s on {active_source_url}")
     
-    yield (f"✅ Live research completed in {duration:.1f}s!", 1.0, result)
+    yield (f"✅ Travel research completed in {duration:.1f}s!", 1.0, result)

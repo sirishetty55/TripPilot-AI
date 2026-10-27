@@ -1,6 +1,7 @@
 """
 SQLite database module for TripPilot AI.
 Persists saved trips, itinerary plans, and MCP research audit logs.
+Supports connection disposal and path overriding for isolated test environments.
 """
 
 import sqlite3
@@ -8,17 +9,20 @@ import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
-from config import DATABASE_PATH
+from config import DATABASE_PATH as CONFIG_DATABASE_PATH
 
-def get_connection() -> sqlite3.Connection:
+DATABASE_PATH = CONFIG_DATABASE_PATH
+
+def get_connection(db_path=None) -> sqlite3.Connection:
     """Creates a connection with row factory enabled."""
-    conn = sqlite3.connect(DATABASE_PATH)
+    target = db_path or DATABASE_PATH
+    conn = sqlite3.connect(target)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
+def init_db(db_path=None):
     """Initializes SQLite schema if not already present."""
-    conn = get_connection()
+    conn = get_connection(db_path=db_path)
     try:
         cursor = conn.cursor()
         
@@ -52,6 +56,21 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+
+        # Image Cache Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS image_cache (
+                cache_key TEXT PRIMARY KEY,
+                image_url TEXT NOT NULL,
+                thumb_url TEXT NOT NULL,
+                alt_text TEXT,
+                attribution_text TEXT,
+                attribution_url TEXT,
+                provider TEXT,
+                is_exact_match INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
     finally:
         conn.close()
@@ -59,10 +78,11 @@ def init_db():
 def save_trip(trip_request_dict: Dict[str, Any],
               research_result_dict: Dict[str, Any],
               itinerary_list: List[Dict[str, Any]],
-              budget_dict: Dict[str, Any]) -> int:
+              budget_dict: Dict[str, Any],
+              db_path=None) -> int:
     """Saves a trip research session into SQLite."""
-    init_db()
-    conn = get_connection()
+    init_db(db_path=db_path)
+    conn = get_connection(db_path=db_path)
     try:
         cursor = conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -90,10 +110,10 @@ def save_trip(trip_request_dict: Dict[str, Any],
     finally:
         conn.close()
 
-def get_all_trips() -> List[Dict[str, Any]]:
+def get_all_trips(db_path=None) -> List[Dict[str, Any]]:
     """Returns all saved trips ordered by latest first."""
-    init_db()
-    conn = get_connection()
+    init_db(db_path=db_path)
+    conn = get_connection(db_path=db_path)
     try:
         cursor = conn.cursor()
         cursor.execute("""
@@ -107,10 +127,10 @@ def get_all_trips() -> List[Dict[str, Any]]:
     finally:
         conn.close()
 
-def get_trip_by_id(trip_id: int) -> Optional[Dict[str, Any]]:
+def get_trip_by_id(trip_id: int, db_path=None) -> Optional[Dict[str, Any]]:
     """Loads a full trip record including parsed JSON payloads."""
-    init_db()
-    conn = get_connection()
+    init_db(db_path=db_path)
+    conn = get_connection(db_path=db_path)
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM saved_trips WHERE id = ?", (trip_id,))
@@ -130,10 +150,10 @@ def get_trip_by_id(trip_id: int) -> Optional[Dict[str, Any]]:
     finally:
         conn.close()
 
-def delete_trip(trip_id: int) -> bool:
+def delete_trip(trip_id: int, db_path=None) -> bool:
     """Deletes a saved trip by ID."""
-    init_db()
-    conn = get_connection()
+    init_db(db_path=db_path)
+    conn = get_connection(db_path=db_path)
     try:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM saved_trips WHERE id = ?", (trip_id,))
@@ -142,10 +162,10 @@ def delete_trip(trip_id: int) -> bool:
     finally:
         conn.close()
 
-def log_research_session(destination: str, status: str, sources_count: int, duration_sec: float, log_summary: str):
+def log_research_session(destination: str, status: str, sources_count: int, duration_sec: float, log_summary: str, db_path=None):
     """Audits research execution duration and MCP source counts."""
-    init_db()
-    conn = get_connection()
+    init_db(db_path=db_path)
+    conn = get_connection(db_path=db_path)
     try:
         cursor = conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -160,10 +180,10 @@ def log_research_session(destination: str, status: str, sources_count: int, dura
     finally:
         conn.close()
 
-def get_recent_research_logs(limit: int = 10) -> List[Dict[str, Any]]:
+def get_recent_research_logs(limit: int = 10, db_path=None) -> List[Dict[str, Any]]:
     """Fetches recent audit logs."""
-    init_db()
-    conn = get_connection()
+    init_db(db_path=db_path)
+    conn = get_connection(db_path=db_path)
     try:
         cursor = conn.cursor()
         cursor.execute("""

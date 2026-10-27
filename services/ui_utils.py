@@ -4,7 +4,52 @@ Injects cohesive, modern travel-themed CSS and reusable badges across Streamlit 
 Fully compatible with both Streamlit Dark Mode and Light Mode.
 """
 
+import html
+from urllib.parse import urlparse
 import streamlit as st
+
+def safe_html(text) -> str:
+    """Escapes user and dynamic text safely for HTML rendering to prevent XSS / script injection."""
+    if text is None:
+        return ""
+    return html.escape(str(text), quote=True)
+
+def safe_url(url) -> str:
+    """Validates and returns safe HTTP/HTTPS URL, disarming javascript:, data:, and invalid schemes."""
+    if not url:
+        return "#"
+    url_str = str(url).strip()
+    try:
+        parsed = urlparse(url_str)
+        if parsed.scheme.lower() in ("http", "https"):
+            return html.escape(url_str, quote=True)
+    except Exception:
+        pass
+    return "#"
+
+def render_card_image(image_url: str, alt_text: str = "", width_px: int = 170, height_px: int = 120, attribution_text: str = "", attribution_url: str = "") -> str:
+    """Renders a safe, responsive image block with alt text and attribution link."""
+    clean_url = safe_url(image_url)
+    if clean_url == "#" or not image_url:
+        return ""
+    
+    escaped_alt = safe_html(alt_text)
+    escaped_attr_text = safe_html(attribution_text)
+    clean_attr_url = safe_url(attribution_url)
+    
+    attr_html = ""
+    if escaped_attr_text:
+        if clean_attr_url != "#":
+            attr_html = f'<div style="font-size: 10px; opacity: 0.7; margin-top: 3px; max-width: {width_px}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><a href="{clean_attr_url}" target="_blank" style="color: inherit; text-decoration: underline;">{escaped_attr_text}</a></div>'
+        else:
+            attr_html = f'<div style="font-size: 10px; opacity: 0.7; margin-top: 3px; max-width: {width_px}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{escaped_attr_text}</div>'
+
+    return f"""
+    <div style="flex-shrink: 0; width: {width_px}px;">
+        <img src="{clean_url}" alt="{escaped_alt}" loading="lazy" style="width: {width_px}px; height: {height_px}px; object-fit: cover; border-radius: 8px;" />
+        {attr_html}
+    </div>
+    """
 
 def apply_custom_theme():
     """Applies modern travel-inspired CSS styling with full dark/light mode compatibility."""
@@ -174,10 +219,10 @@ def apply_custom_theme():
     """, unsafe_allow_html=True)
 
 def render_hero(title: str, subtitle: str):
-    """Renders a styled hero banner."""
+    """Renders a styled hero banner safely."""
     st.markdown(f"""
         <div class="hero-banner">
-            <h1>{title}</h1>
-            <p>{subtitle}</p>
+            <h1>{safe_html(title)}</h1>
+            <p>{safe_html(subtitle)}</p>
         </div>
     """, unsafe_allow_html=True)

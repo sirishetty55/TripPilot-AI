@@ -118,7 +118,7 @@ with st.form("travel_search_form"):
             "🏨 Accommodation Tier",
             options=ACCOMMODATION_TIERS,
             index=ACCOMMODATION_TIERS.index(default_accom) if default_accom in ACCOMMODATION_TIERS else 0,
-            format_func=lambda x: f"{x.capitalize()} ({'₹800-₹2,000' if x=='budget' else '₹2,500-₹5,000' if x=='mid-range' else '₹7,500+'}/night)"
+            format_func=lambda x: x.capitalize()
         )
 
     with col2:
@@ -204,6 +204,9 @@ if research_btn:
             [p.to_dict() for p in itinerary],
             budget.to_dict()
         )
+
+        # Reset any manual budget overrides from previous trips
+        st.session_state["budget_overrides"] = {}
 
         # Save to Streamlit Session State for seamless multi-page access
         st.session_state["active_trip_id"] = trip_id

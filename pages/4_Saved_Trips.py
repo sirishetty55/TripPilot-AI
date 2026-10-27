@@ -5,7 +5,7 @@ Persistent SQLite trip storage allowing users to reload, review, and delete prev
 
 import streamlit as st
 import json
-from services.ui_utils import apply_custom_theme, render_hero
+from services.ui_utils import apply_custom_theme, render_hero, safe_html
 from models import TripRequest, TripResearchResult, DayPlan, BudgetBreakdown
 import database
 
@@ -37,13 +37,13 @@ for item in trips:
         st.markdown(f"""
         <div class="travel-card">
             <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="margin: 0; color: #0f766e;">#{trip_id} &bull; {dest}</h3>
+                <h3 style="margin: 0; color: #0f766e;">#{trip_id} &bull; {safe_html(dest)}</h3>
                 <span class="badge-price">₹{budget:,.0f} Budget</span>
             </div>
             <div style="font-size: 14px; color: inherit; opacity: 0.88; margin: 8px 0;">
-                📅 <strong>Travel Dates:</strong> {dep} to {ret} &nbsp;|&nbsp; 
-                👥 <strong>Travelers:</strong> {travelers} &nbsp;|&nbsp;
-                🕒 <strong>Researched On:</strong> {created_at}
+                📅 <strong>Travel Dates:</strong> {safe_html(dep)} to {safe_html(ret)} &nbsp;|&nbsp; 
+                👥 <strong>Travelers:</strong> {safe_html(travelers)} &nbsp;|&nbsp;
+                🕒 <strong>Researched On:</strong> {safe_html(created_at)}
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -53,6 +53,7 @@ for item in trips:
             if st.button(f"📂 Reopen Trip #{trip_id}", key=f"open_{trip_id}", use_container_width=True):
                 full_trip = database.get_trip_by_id(trip_id)
                 if full_trip:
+                    st.session_state["budget_overrides"] = {}
                     st.session_state["active_trip_id"] = trip_id
                     st.session_state["active_trip_request"] = TripRequest.from_dict(full_trip["trip_request"])
                     st.session_state["active_research_result"] = TripResearchResult.from_dict(full_trip["research_result"])

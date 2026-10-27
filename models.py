@@ -26,6 +26,8 @@ class TripRequest:
         try:
             d1 = datetime.strptime(self.departure_date, "%Y-%m-%d").date()
             d2 = datetime.strptime(self.return_date, "%Y-%m-%d").date()
+            if d2 < d1:
+                return 1
             diff = (d2 - d1).days + 1
             return max(1, diff)
         except Exception:
@@ -33,7 +35,14 @@ class TripRequest:
 
     @property
     def num_nights(self) -> int:
-        return max(1, self.num_days - 1)
+        try:
+            d1 = datetime.strptime(self.departure_date, "%Y-%m-%d").date()
+            d2 = datetime.strptime(self.return_date, "%Y-%m-%d").date()
+            if d2 <= d1:
+                return 0
+            return (d2 - d1).days
+        except Exception:
+            return max(0, self.num_days - 1)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -80,6 +89,8 @@ class Attraction:
     source_url: str = ""
     maps_url: str = ""
     image_url: str = ""
+    attribution_text: str = ""
+    attribution_url: str = ""
 
     def __post_init__(self):
         if not self.maps_url and self.name:
@@ -109,6 +120,8 @@ class Accommodation:
     booking_url: str = ""
     maps_url: str = ""
     image_url: str = ""
+    attribution_text: str = ""
+    attribution_url: str = ""
 
     def __post_init__(self):
         query = quote_plus(f"{self.property_name} {self.location}")
@@ -138,6 +151,8 @@ class FoodExperience:
     source_url: str = ""
     maps_url: str = ""
     image_url: str = ""
+    attribution_text: str = ""
+    attribution_url: str = ""
 
     def __post_init__(self):
         if not self.maps_url and self.name:
@@ -184,6 +199,8 @@ class BudgetBreakdown:
     total_estimated: float
     remaining_budget: float
     is_over_budget: bool
+    transit_cost: float = 0.0
+    per_person_total: float = 0.0
     assumptions: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
