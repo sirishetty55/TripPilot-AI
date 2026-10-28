@@ -151,10 +151,16 @@ GENERIC_OR_INVALID_ATTRACTION_NAMES = {
     "connect", "telecoms", "mobile", "internet", "cope", "work", "study", "learn",
     "visas", "passports", "customs regulations", "emergency", "embassies", "consulates",
     "contact", "addresses", "contacts", "phone numbers", "opening hours", "time zone",
-    "currency", "costs", "tipping", "money", "shopping", "events", "festivals",
+    "currency", "costs", "tipping", "money", "events", "festivals",
     "holidays", "public holidays", "national holidays", "bank holidays", "school holidays",
     "public holiday", "national holiday", "bank holiday", "the year in sweden",
+    "the year in france", "the year in italy", "the year in spain", "the year in",
     "itineraries", "routes", "map", "maps", "facts", "quick facts", "smoking", "alcohol",
+    # Merchandise, shopping & commercial goods
+    "wine and other products", "other products", "local products", "products",
+    "wine and spirits", "souvenirs", "shopping and souvenirs", "shopping", "what to buy",
+    "handicrafts", "local specialties", "markets and shopping", "clothing and textiles",
+    "duty free", "duty-free", "currency exchange",
 }
 
 NON_ATTRACTION_TERMS = (
@@ -164,6 +170,8 @@ NON_ATTRACTION_TERMS = (
     "public holiday", "national holiday", "bank holiday", "external links", "further reading",
     "other destinations", "getting there", "getting around", "stay safe", "stay healthy",
     "the year in", "when to ", "how to ", "what to ", "where to ",
+    "wine and other products", "other products", "local products", "products",
+    "souvenirs", "shopping in", "what to buy",
 )
 
 ATTRACTION_INDICATOR_WORDS = {
@@ -190,11 +198,25 @@ ATTRACTION_INDICATOR_WORDS = {
 }
 
 def is_valid_attraction_name(name: str, destination: str) -> bool:
-    """Reject navigation labels, generic placeholders, and transport/service headings."""
+    """Reject navigation labels, generic placeholders, shopping/merchandise, and transport/service headings."""
     value = re.sub(r"\s+", " ", str(name or "")).strip(" -–—:|.")
     folded = value.casefold()
     if len(value) < 4 or len(value) > 100 or folded == destination.casefold():
         return False
+
+    # Block individual guide division names and meta sections
+    single_word_non_attractions = {
+        "regions", "cities", "districts", "boroughs", "suburbs", "quarters", "provinces",
+        "understand", "background", "history", "geography", "demographics", "climate", "weather",
+        "see", "do", "buy", "eat", "drink", "sleep", "connect", "cope", "work", "study",
+        "contents", "references", "navigation", "menu", "talk", "overview", "safety", "health",
+        "electricity", "utilities", "power", "money", "costs", "tipping", "shopping", "products",
+        "souvenirs", "visas", "passports", "emergency", "holidays", "transport", "transportation",
+        "name", "people", "locals", "population", "events", "festivals", "itineraries"
+    }
+    if folded in single_word_non_attractions:
+        return False
+
     # Single-word fully lowercase is almost always a guide section, not a named attraction
     if " " not in value and value == value.lower():
         return False
@@ -205,15 +227,16 @@ def is_valid_attraction_name(name: str, destination: str) -> bool:
     bad_prefixes = (
         "the year in", "when to ", "get ", "by ", "stay ", "how to ",
         "what to ", "where to ", "public holiday", "national holiday",
-        "bank holiday", "school holiday",
+        "bank holiday", "school holiday", "traditional ", "getting ",
     )
     if any(folded.startswith(p) for p in bad_prefixes):
         return False
     bad_substrings = (
         "electricity", "utilities", "tourist information", "visitor information",
-        "external links", "further reading", "see also", "other destinations",
-        "public holiday", "national holiday", "bank holiday", "calling code",
-        "country code", "time zone",
+        "practical information", "external links", "further reading", "see also",
+        "other destinations", "public holiday", "national holiday", "bank holiday",
+        "calling code", "country code", "time zone", "emergency", "wine and other products",
+        "products", "souvenirs", "shopping in",
     )
     if any(s in folded for s in bad_substrings):
         return False
@@ -229,9 +252,12 @@ def is_valid_attraction_name(name: str, destination: str) -> bool:
             "the year", "the region", "the city", "the area", "the country",
             "the people", "the culture", "the economy", "the history",
             "the climate", "the weather", "the politics", "the language",
-            "the currency", "the population",
+            "the currency", "the population", "traditional crafts", "traditional foods",
+            "local products", "wine and", "beer and", "food and", "drinks and"
         }
         if any(folded.startswith(gc) for gc in generic_concepts):
+            return False
+        if any(w in ("products", "product", "utilities", "information", "regulations", "services") for w in folded.split()):
             return False
         return True
     return False
@@ -287,8 +313,10 @@ def curated_destination_attractions(destination: str) -> List[Attraction]:
             ("Basilica of Bom Jesus", "16th-century baroque basilica holding the sacred mortal remains of St. Francis Xavier in Old Goa.", "UNESCO Heritage Church", "Old Goa"),
             ("Fort Aguada & Lighthouse", "Well-preserved 17th-century Portuguese fortress overlooking Sinquerim beach and the Arabian Sea.", "Coastal Fortress", "Sinquerim"),
             ("Dudhsagar Waterfalls", "Four-tiered roaring white cascade on the Mandovi River nestled in dense Western Ghats jungle.", "Scenic Waterfall", "Sonaulim"),
+            ("Baga Beach", "Vibrant North Goa shoreline celebrated for water sports, beach shacks, lively sunset vibe, and dolphin boat cruises.", "Sandy Beach & Water Sports", "North Goa"),
             ("Palolem Beach", "Crescent-shaped serene beach surrounded by coconut palms, rocky headlands, and calm waters.", "Scenic Coastline", "Canacona"),
             ("Fontainhas Latin Quarter", "Colorful Portuguese colonial residential quarter in Panaji with tiled roofs, cafes, and art galleries.", "Heritage Precinct", "Panaji"),
+            ("Chapora Fort", "Historic hilltop laterite fort commanding sweeping views over Vagator beach and the Chapora river estuary.", "Hilltop Fortress", "Vagator"),
         ],
         "jaipur": [
             ("Amber Fort & Palace", "Majestic 16th-century Rajput palace fortress with marble courtyards, Sheesh Mahal, and Maota Lake.", "Hilltop Fortress", "Amer"),
@@ -351,6 +379,412 @@ def curated_destination_attractions(destination: str) -> List[Attraction]:
             image_url="",
         ))
     return results
+
+
+def get_categorized_tourist_places(
+    destination: str,
+    attractions: Optional[List[Attraction]] = None
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Returns real destination-specific places organized into logical tourist categories
+    (e.g. Beaches & Coastal, Heritage & Forts, Spiritual & Culture, Nature & Waterfalls).
+    Dynamically adapts when destination changes; never hardcoded to one location.
+    """
+    dest_clean = destination.strip()
+    key = dest_clean.casefold()
+
+    curated_map: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
+        "goa": {
+            "🏖️ Beaches & Coastal Sights": [
+                {
+                    "name": "Baga Beach",
+                    "category": "Beach & Water Sports",
+                    "description": "Vibrant North Goa beach famous for parasailing, jet-skiing, lively beach shacks, coastal sunset views, and dolphin sightseeing boat tours.",
+                    "location": "North Goa",
+                    "timings": "Open 24 hours (Water activities: 09:00 AM - 06:00 PM)",
+                    "highlights": "Water sports, beachfront cafes, dolphin boat cruises, vibrant evening atmosphere",
+                    "image_url": "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=600&auto=format&fit=crop&q=80",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Baga Beach Goa')}"
+                },
+                {
+                    "name": "Palolem Beach",
+                    "category": "Scenic Crescent Coastline",
+                    "description": "Idyllic crescent-shaped white sand beach in South Goa bordered by rocky headlands and coconut groves, featuring calm waters perfect for kayaking.",
+                    "location": "Canacona, South Goa",
+                    "timings": "Open 24 hours (Kayaking & boat trips: sunrise to sunset)",
+                    "highlights": "Calm swimming bay, sea kayaking, quiet sunset views, island boat trips",
+                    "image_url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Palolem Beach Goa')}"
+                },
+                {
+                    "name": "Anjuna Beach",
+                    "category": "Cliff Coast & Bohemian Vibe",
+                    "description": "Famous for its red laterite sea cliffs, coastal sunset shacks, rocky tide pools, and the historic Wednesday flea market.",
+                    "location": "Anjuna, North Goa",
+                    "timings": "Open 24 hours",
+                    "highlights": "Laterite cliffs, Curlies beachfront strip, rocky shoreline walks",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Anjuna Beach Goa')}"
+                },
+                {
+                    "name": "Calangute Beach",
+                    "category": "Expansive Golden Shore",
+                    "description": "Celebrated as the 'Queen of Beaches', stretching along a wide golden sand shoreline with water sports, boat rides, and seafood stalls.",
+                    "location": "Calangute, North Goa",
+                    "timings": "Open 24 hours",
+                    "highlights": "Parasailing, banana boat rides, wide sandy promenade",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Calangute Beach Goa')}"
+                }
+            ],
+            "🏰 Heritage, Forts & Palaces": [
+                {
+                    "name": "Fort Aguada & Lighthouse",
+                    "category": "17th-Century Coastal Fortress",
+                    "description": "Massive Portuguese coastal fortress built in 1612 overlooking Sinquerim Beach, featuring historic stone ramparts and an iconic 4-story lighthouse.",
+                    "location": "Sinquerim, Candolim",
+                    "timings": "09:30 AM - 06:00 PM (Daily)",
+                    "highlights": "Oceanfront stone ramparts, historic freshwater cistern, 1864 four-tiered lighthouse",
+                    "image_url": "https://images.unsplash.com/photo-1587974928442-77dc3e0dba72?w=600&auto=format&fit=crop&q=80",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Fort Aguada Goa')}"
+                },
+                {
+                    "name": "Chapora Fort",
+                    "category": "Hilltop Red Laterite Fortress",
+                    "description": "Historic laterite fort perched high above the Chapora River estuary with sweeping 360-degree vistas over Vagator Beach, popular at sunset.",
+                    "location": "Chapora, Vagator",
+                    "timings": "09:00 AM - 05:30 PM",
+                    "highlights": "Panoramic sunset views, river-estuary views, atmospheric laterite ruins",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Chapora Fort Goa')}"
+                },
+                {
+                    "name": "Reis Magos Fort",
+                    "category": "Restored Cultural Heritage Fort",
+                    "description": "Restored 16th-century river fortress on the northern bank of Mandovi River, housing museum galleries and historical Portuguese defense cannons.",
+                    "location": "Reis Magos, Bardez",
+                    "timings": "09:30 AM - 05:00 PM (Closed Mondays)",
+                    "highlights": "River vistas, Mario Miranda art gallery, Portuguese defense cannons",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Reis Magos Fort Goa')}"
+                }
+            ],
+            "🛕 Spiritual & Cultural Landmarks": [
+                {
+                    "name": "Basilica of Bom Jesus",
+                    "category": "UNESCO World Heritage Baroque Church",
+                    "description": "World-famous 16th-century baroque basilica holding the sacred mortal remains of St. Francis Xavier in an ornate glass-sided silver casket.",
+                    "location": "Old Goa (Velha Goa)",
+                    "timings": "09:00 AM - 06:30 PM (Sundays: 10:30 AM - 06:30 PM)",
+                    "highlights": "Relics of St. Francis Xavier, Manueline marble altars, UNESCO baroque architecture",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Basilica of Bom Jesus Goa')}"
+                },
+                {
+                    "name": "Se Cathedral",
+                    "category": "Grand Tuscan-Manueline Cathedral",
+                    "description": "One of Asia's largest churches, dedicated to Saint Catherine of Alexandria, renowned for its grand Tuscan exterior and famous 'Golden Bell'.",
+                    "location": "Old Goa",
+                    "timings": "07:30 AM - 06:00 PM (Daily)",
+                    "highlights": "Golden Bell (largest bell in Goa), ornate side chapels, Corinthian-style high altar",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Se Cathedral Old Goa')}"
+                },
+                {
+                    "name": "Shri Mangueshi Temple",
+                    "category": "Prominent Hindu Temple",
+                    "description": "Historic 18th-century temple dedicated to Lord Shiva in Priol, featuring a distinctive 7-story octagonal deepastambha (lamp tower).",
+                    "location": "Priol, Ponda",
+                    "timings": "06:00 AM - 09:00 PM (Daily)",
+                    "highlights": "Seven-storey lamp tower, temple water tank, distinctive Saraswat Goan architecture",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Mangueshi Temple Goa')}"
+                }
+            ],
+            "🌿 Nature, Waterfalls & Scenic Spots": [
+                {
+                    "name": "Dudhsagar Waterfalls",
+                    "category": "Four-Tiered Roaring Waterfall",
+                    "description": "Breathtaking 310-meter four-tiered cascade on the Mandovi River, tumbling down vertical cliffs surrounded by lush Western Ghats tropical jungle.",
+                    "location": "Bhagwan Mahaveer Sanctuary, Sonaulim",
+                    "timings": "07:00 AM - 05:00 PM (Jeep safaris operated through national park gates)",
+                    "highlights": "Jeep jungle safari, railway arch bridge vantage point, natural freshwater pools",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Dudhsagar Waterfalls Goa')}"
+                },
+                {
+                    "name": "Salim Ali Bird Sanctuary",
+                    "category": "Estuarine Mangrove Reserve",
+                    "description": "Pristine coastal mangrove ecosystem on Chorao Island along the Mandovi River, accessible via ferry and wooden boardwalks.",
+                    "location": "Chorao Island, Ribandar",
+                    "timings": "06:00 AM - 06:00 PM (Best: Early morning)",
+                    "highlights": "Boat canopy tours, mudskippers, kingfishers, herons, and migratory wetland species",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Salim Ali Bird Sanctuary Goa')}"
+                }
+            ]
+        },
+        "jaipur": {
+            "🏰 Heritage, Forts & Palaces": [
+                {
+                    "name": "Amber Fort & Palace",
+                    "category": "Hilltop Rajput Fortress",
+                    "description": "Majestic 16th-century palace fortress built from yellow and pink sandstone, featuring the mirror-work Sheesh Mahal overlooking Maota Lake.",
+                    "location": "Amer, Jaipur",
+                    "timings": "08:00 AM - 05:30 PM & 06:30 PM - 09:15 PM",
+                    "highlights": "Sheesh Mahal (Palace of Mirrors), Diwan-e-Khas, Maota Lake views, royal courtyards",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Amber Fort Jaipur')}"
+                },
+                {
+                    "name": "Nahargarh Fort",
+                    "category": "Hilltop Panoramic Fort",
+                    "description": "Fortress perched along the rugged Aravalli hills, providing breathtaking panoramic sunset vistas overlooking the entire Pink City.",
+                    "location": "Aravalli Hills, Jaipur",
+                    "timings": "10:00 AM - 05:30 PM",
+                    "highlights": "Panoramic sunset viewpoints, Madhavendra Bhawan suites, wax museum",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Nahargarh Fort Jaipur')}"
+                },
+                {
+                    "name": "Jaigarh Fort",
+                    "category": "Military Fortress & Cannon Foundry",
+                    "description": "Formidable medieval fortress overlooking Amber Fort, housing the massive 'Jaivana' - once the world's largest cannon on wheels.",
+                    "location": "Cheel ka Teela, Jaipur",
+                    "timings": "09:00 AM - 05:00 PM",
+                    "highlights": "Jaivana cannon, underground armory, subterranean water reservoirs",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Jaigarh Fort Jaipur')}"
+                }
+            ],
+            "🏛️ Palaces & Monuments": [
+                {
+                    "name": "Hawa Mahal (Palace of Winds)",
+                    "category": "Iconic Pink Sandstone Facade",
+                    "description": "Iconic five-story facade featuring 953 intricately carved jharokhas (casements) designed for royal court women to view street festivities.",
+                    "location": "Badi Choupad, Old City",
+                    "timings": "09:00 AM - 05:00 PM",
+                    "highlights": "953 jharokhas, colorful stained glass windows, panoramic bazaar views from top",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Hawa Mahal Jaipur')}"
+                },
+                {
+                    "name": "City Palace & Museum",
+                    "category": "Royal Palace Complex",
+                    "description": "Magnificent royal residence fusing Rajasthani and Mughal architecture, containing courtyards, Peacock Gate, and the royal museum.",
+                    "location": "Old City, Jaipur",
+                    "timings": "09:30 AM - 05:00 PM",
+                    "highlights": "Pritam Niwas Chowk (Peacock Gate), Mubarak Mahal, royal textile collections",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('City Palace Jaipur')}"
+                },
+                {
+                    "name": "Jantar Mantar Observatory",
+                    "category": "UNESCO Astronomical Observatory",
+                    "description": "Collection of nineteen architectural astronomical instruments built by Rajput King Sawai Jai Singh II, featuring the world's largest stone sundial.",
+                    "location": "Gangori Bazaar, Jaipur",
+                    "timings": "09:00 AM - 05:00 PM",
+                    "highlights": "Vrihat Samrat Yantra sundial, astronomical tracking dials, UNESCO heritage site",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Jantar Mantar Jaipur')}"
+                }
+            ],
+            "🌿 Nature & Gardens": [
+                {
+                    "name": "Jal Mahal (Water Palace)",
+                    "category": "Lake Palace & Scenic Overlook",
+                    "description": "Low-rise Rajput palace situated in the middle of Man Sagar Lake, appearing to float with the Aravalli hills in the backdrop.",
+                    "location": "Man Sagar Lake, Jaipur",
+                    "timings": "Viewable from lakefront promenade 24/7",
+                    "highlights": "Sunset lake reflections, migratory bird spotting, illuminated evening views",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Jal Mahal Jaipur')}"
+                },
+                {
+                    "name": "Sisodia Rani Ka Bagh",
+                    "category": "Tiered Royal Terraced Garden",
+                    "description": "Multi-tiered hillside garden with painted pavilions, bubbling fountains, water channels, and murals illustrating the life of Lord Krishna.",
+                    "location": "Agra Road, Ghat Ki Guni",
+                    "timings": "08:00 AM - 08:00 PM",
+                    "highlights": "Terraced waterways, Radha-Krishna murals, tranquil hill gorge setting",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Sisodia Rani Garden Jaipur')}"
+                }
+            ]
+        },
+        "kundapura": {
+            "🏖️ Beaches & Estuaries": [
+                {
+                    "name": "Maravanthe Beach",
+                    "category": "Scenic Coastal Stretch",
+                    "description": "Unique coastal highway bordered by the Arabian Sea on one side and the Souparnika River on the other, creating one of India's most scenic coastal drives.",
+                    "location": "Maravanthe, NH 66",
+                    "timings": "Open 24 hours (Best: Sunset)",
+                    "highlights": "Sea on left and river on right, sunset vantage, fresh seafood stalls",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Maravanthe Beach Kundapura')}"
+                },
+                {
+                    "name": "Kodi Beach & Sea Walk",
+                    "category": "Estuary Beach & Promenade",
+                    "description": "Quiet coastal beach where the river meets the sea, featuring an extended sea-walk pathway into the water and a beach lighthouse.",
+                    "location": "Kodi, Kundapura",
+                    "timings": "Open 24 hours",
+                    "highlights": "Sea walk promenade, estuary views, quiet shoreline",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Kodi Beach Kundapura')}"
+                }
+            ],
+            "🛕 Spiritual & Culture": [
+                {
+                    "name": "Kollur Mookambika Temple",
+                    "category": "Ancient Pilgrimage Shrine",
+                    "description": "Famed Hindu temple nestled at the foothills of Kodachadri peak in the Western Ghats, dedicated to Goddess Mookambika.",
+                    "location": "Kollur, Udupi District",
+                    "timings": "05:00 AM - 01:30 PM & 03:00 PM - 09:00 PM",
+                    "highlights": "Jyotirlinga shrine, Western Ghats jungle foothills, golden palanquin",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Kollur Mookambika Temple Kundapura')}"
+                },
+                {
+                    "name": "Anegudde Vinayaka Temple",
+                    "category": "Sacred Ganesha Temple",
+                    "description": "Revered temple in Kumbashi dedicated to Lord Ganesha, attracting thousands of visitors and pilgrims.",
+                    "location": "Kumbashi, Kundapura",
+                    "timings": "06:00 AM - 08:30 PM",
+                    "highlights": "Silver armor Ganesha idol, holy pond, tranquil coastal countryside",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Anegudde Temple Kumbashi')}"
+                }
+            ],
+            "🌿 Nature & Viewpoints": [
+                {
+                    "name": "Ottinene View Point",
+                    "category": "Cliff Viewpoint & Estuary",
+                    "description": "High coastal cliff viewpoint near Byndoor offering dramatic panoramic vistas of the Souparnika River joining the Arabian Sea.",
+                    "location": "Near Byndoor, Kundapura",
+                    "timings": "Sunrise to sunset",
+                    "highlights": "Estuary panorama, sunset views, coastal cliff photography",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Ottinene View Point Kundapura')}"
+                }
+            ]
+        },
+        "kerala": {
+            "🌿 Nature & Backwaters": [
+                {
+                    "name": "Alleppey Backwaters & Houseboats",
+                    "category": "Labyrinth Waterways",
+                    "description": "Tranquil network of canals, lagoons, and lakes navigated on traditional thatched kettuvallam houseboats.",
+                    "location": "Alappuzha, Kerala",
+                    "timings": "Houseboat check-in 12:00 PM",
+                    "highlights": "Paddy fields below sea level, village canals, coconut palms",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Alleppey Backwaters Kerala')}"
+                },
+                {
+                    "name": "Munnar Tea Plantations",
+                    "category": "Highland Tea Gardens",
+                    "description": "Rolling emerald tea plantations and misty highland valleys, home to the endangered Nilgiri Tahr at Eravikulam National Park.",
+                    "location": "Munnar, Idukki",
+                    "timings": "08:30 AM - 04:30 PM",
+                    "highlights": "Tea museum, Nilgiri Tahr sightings, mountain mist viewpoints",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Munnar Tea Gardens Kerala')}"
+                },
+                {
+                    "name": "Athirappilly Waterfalls",
+                    "category": "Majestic Cascading Fall",
+                    "description": "Dramatic 80-foot wide waterfall on the Chalakudy River in the Sholayar forest range, often called the Niagara of South India.",
+                    "location": "Thrissur District",
+                    "timings": "08:00 AM - 05:00 PM",
+                    "highlights": "Forest nature walk, spray viewpoints, lush tropical scenery",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Athirappilly Falls Kerala')}"
+                }
+            ],
+            "🏖️ Beaches & Coastal": [
+                {
+                    "name": "Kovalam Beach",
+                    "category": "Crescent Beach & Lighthouse",
+                    "description": "Famous crescent-shaped beach featuring a 30-meter high red-and-white striped lighthouse with sweeping Arabian Sea views.",
+                    "location": "Kovalam, Thiruvananthapuram",
+                    "timings": "Open 24 hours (Lighthouse: 10:00 AM - 05:00 PM)",
+                    "highlights": "Lighthouse climb, shallow swimming bays, beach cafes",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Kovalam Beach Kerala')}"
+                },
+                {
+                    "name": "Varkala Cliff Beach",
+                    "category": "Sedimentary Cliff Coastline",
+                    "description": "Dramatic red laterite cliffs bordering the Arabian Sea, lined with bohemian cafes and natural mineral water springs.",
+                    "location": "Varkala",
+                    "timings": "Open 24 hours",
+                    "highlights": "Cliff-edge walking promenade, natural spring bath, sunset views",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Varkala Cliff Beach Kerala')}"
+                }
+            ],
+            "🏰 Heritage & Culture": [
+                {
+                    "name": "Fort Kochi Chinese Fishing Nets",
+                    "category": "Historic Coastal Landmark",
+                    "description": "Historic shore-operated cantilevered fishing nets operating along the Kochi harbor since the 14th century.",
+                    "location": "Fort Kochi, Ernakulam",
+                    "timings": "Best at sunrise and sunset",
+                    "highlights": "Cantilever net operations, fresh catch market, heritage promenade",
+                    "image_url": "",
+                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={quote_plus('Chinese Fishing Nets Fort Kochi')}"
+                }
+            ]
+        }
+    }
+
+    # Match curated destination
+    for k, cat_dict in curated_map.items():
+        if k in key:
+            return cat_dict
+
+    # Dynamic categorization for any arbitrary destination from research attractions
+    dynamic_categories: Dict[str, List[Dict[str, Any]]] = {
+        "🏖️ Beaches & Coastal Sights": [],
+        "🏰 Heritage, Forts & Palaces": [],
+        "🛕 Spiritual & Cultural Landmarks": [],
+        "🌿 Nature, Waterfalls & Scenic Spots": [],
+        "🏛️ Iconic City Landmarks": []
+    }
+
+    pool = attractions or curated_destination_attractions(dest_clean)
+    for a in pool:
+        name = a.name
+        cat = getattr(a, "category", "")
+        desc = getattr(a, "description", "")
+        combined = f"{name} {cat} {desc}".lower()
+
+        place_entry = {
+            "name": name,
+            "category": cat or "Sightseeing Landmark",
+            "description": desc or f"Notable landmark and visitor highlight in {dest_clean}.",
+            "location": getattr(a, "location", dest_clean),
+            "timings": getattr(a, "opening_hours", "Check local schedule"),
+            "highlights": "Architecture, guided tours, scenic photography",
+            "image_url": getattr(a, "image_url", ""),
+            "maps_url": getattr(a, "maps_url", f"https://www.google.com/maps/search/?api=1&query={quote_plus(name + ' ' + dest_clean)}")
+        }
+
+        if any(w in combined for w in ["beach", "coast", "bay", "cove", "island", "sea", "ocean", "shore"]):
+            dynamic_categories["🏖️ Beaches & Coastal Sights"].append(place_entry)
+        elif any(w in combined for w in ["fort", "castle", "palace", "heritage", "ruin", "historic", "wall", "gate"]):
+            dynamic_categories["🏰 Heritage, Forts & Palaces"].append(place_entry)
+        elif any(w in combined for w in ["temple", "church", "cathedral", "basilica", "mosque", "shrine", "spiritual", "dargah", "monastery"]):
+            dynamic_categories["🛕 Spiritual & Cultural Landmarks"].append(place_entry)
+        elif any(w in combined for w in ["waterfall", "lake", "river", "mountain", "peak", "valley", "canyon", "park", "garden", "sanctuary", "forest", "nature"]):
+            dynamic_categories["🌿 Nature, Waterfalls & Scenic Spots"].append(place_entry)
+        else:
+            dynamic_categories["🏛️ Iconic City Landmarks"].append(place_entry)
+
+    # Return only categories that have at least one place
+    return {k: v for k, v in dynamic_categories.items() if v}
 
 
 def check_route_feasibility(origin: str, destination: str) -> Tuple[bool, str]:
@@ -1052,7 +1486,11 @@ Perform comprehensive extraction and planning:
                 itinerary_plans=itinerary_plans
             )
     except Exception as e:
-        print(f"Gemini API live parsing note: {e}")
+        err_str = str(e)
+        if "503" in err_str or "unavailable" in err_str.lower():
+            print(f"Gemini API 503 Service Unavailable note: {e}")
+        else:
+            print(f"Gemini API live parsing note: {e}")
         return None
 
 def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url: str) -> TripResearchResult:
@@ -1065,9 +1503,17 @@ def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url:
     
     lines = snapshot_text.splitlines()
     non_attraction_headings = {
-        "understand", "weather", "climate", "get in", "get there", "get around",
+        "understand", "weather", "climate", "get in", "get there", "get around", "get out",
         "see", "do", "buy", "eat", "drink", "sleep", "go next", "contents",
-        "references", "external links", "navigation", "menu",
+        "references", "external links", "navigation", "menu", "see also", "further reading",
+        "districts", "regions", "cities", "other destinations", "boroughs", "suburbs",
+        "the year in", "the year in sweden", "electricity and utilities", "electricity", "utilities",
+        "tourist information", "visitor information", "practical information", "practicalities",
+        "stay safe", "stay healthy", "safety", "health", "respect", "customs", "etiquette",
+        "connect", "telecoms", "mobile", "cope", "work", "study", "learn", "visas",
+        "passports", "emergency", "holidays", "public holidays", "national holidays",
+        "wine and other products", "other products", "local products", "products",
+        "souvenirs", "shopping", "shopping in",
     }
     for line in lines:
         cleaned = line.strip()
@@ -1078,6 +1524,7 @@ def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url:
                 if (
                     is_valid_attraction_name(name, dest)
                     and name.casefold() not in non_attraction_headings
+                    and not any(term in name.casefold() for term in ("wine and other products", "electricity", "utilities", "districts", "regions", "cities", "other destinations", "tourist info"))
                     and not any(skip in name.lower() for skip in ["contents", "navigation", "see also", "references", "external links", "menu"])
                 ):
                     if len(attractions) < 10 and all(existing.name.casefold() != name.casefold() for existing in attractions):
@@ -1123,7 +1570,7 @@ def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url:
 
     return TripResearchResult(
         destination=dest,
-        summary=f"Verified travel intelligence for {dest} gathered live via Playwright MCP browser automation.",
+        summary=f"Curated travel intelligence for {dest} synthesized from live travel guide references and routing models. AI suggestions should be verified before visiting.",
         attractions=attractions,
         accommodations=accommodations,
         food_experiences=food_experiences,
@@ -1145,10 +1592,10 @@ def parse_with_heuristics(snapshot_text: str, trip_req: TripRequest, source_url:
             "signature_food": ", ".join(food.name for food in food_experiences[:3])
         },
         sources_accessed=[
-            {"url": source_url, "title": f"Live {dest} Guide", "status": "Scraped via Playwright MCP"},
-            {"url": "https://www.booking.com", "title": "Booking.com Hotel Directory", "status": "Direct stay link verified"},
-            {"url": "https://www.google.com/travel/flights", "title": "Flight & Airport Schedules", "status": "Air route verified"},
-            {"url": "https://www.makemytrip.com/railways", "title": "Indian Railways / IRCTC Portal", "status": "Rail route verified"}
+            {"url": source_url or "https://en.wikivoyage.org/", "title": f"Live {dest} Guide", "status": "Page snapshot indexed via Playwright MCP"},
+            {"url": "https://www.booking.com", "title": "Booking.com Hotel Directory", "status": "Stay search links generated"},
+            {"url": "https://www.google.com/travel/flights", "title": "Flight & Airport Schedules", "status": "Air route parameters checked"},
+            {"url": "https://www.redbus.in/", "title": "RedBus Portal", "status": "Intercity bus routing mapped"}
         ],
         research_timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         is_demo_data=False,
@@ -1219,12 +1666,13 @@ def execute_travel_research(
         result.attractions or result.accommodations or result.food_experiences or result.commute_options
     ))
     if not has_usable_content:
-        yield ("⚡ AI returned no usable listings; applying destination-aware fallback and route checks...", 0.92, None)
+        yield (f"⚡ AI synthesis unavailable or incomplete; applying destination-matched heuristic research for {dest}...", 0.92, None)
         fallback = parse_with_heuristics(snapshot_text or "", trip_req, active_source_url or "")
         if result is None:
             result = fallback
         else:
             # Preserve any valid AI sections while filling empty sections from the fallback.
+            result.destination = dest
             result.attractions = result.attractions or fallback.attractions
             result.accommodations = result.accommodations or fallback.accommodations
             result.food_experiences = result.food_experiences or fallback.food_experiences

@@ -114,7 +114,7 @@ def _fetch_from_wikimedia(query: str, search_context: str = "", index: int = 0) 
         "generator": "search",
         "gsrsearch": search_term,
         "gsrnamespace": 0,
-        "gsrlimit": max(1, index + 1),
+        "gsrlimit": max(5, index + 3),
         "gsroffset": index,
         "prop": "pageimages|info",
         "piprop": "thumbnail|original",
@@ -137,11 +137,19 @@ def _fetch_from_wikimedia(query: str, search_context: str = "", index: int = 0) 
         if not pages:
             return None
             
-        first_page = next(iter(pages.values()))
-        thumb = first_page.get("thumbnail", {}).get("source", "")
-        original = first_page.get("original", {}).get("source", thumb)
-        title = first_page.get("title", query)
-        page_url = first_page.get("fullurl", f"https://en.wikipedia.org/wiki/{quote_plus(title.replace(' ', '_'))}")
+        page_list = list(pages.values())
+        valid_pages = [
+            p for p in page_list
+            if p.get("thumbnail", {}).get("source") or p.get("original", {}).get("source")
+        ]
+        if not valid_pages:
+            return None
+            
+        selected_page = valid_pages[index % len(valid_pages)]
+        thumb = selected_page.get("thumbnail", {}).get("source", "")
+        original = selected_page.get("original", {}).get("source", thumb)
+        title = selected_page.get("title", query)
+        page_url = selected_page.get("fullurl", f"https://en.wikipedia.org/wiki/{quote_plus(title.replace(' ', '_'))}")
         
         if thumb or original:
             img_url = original if original else thumb
@@ -159,14 +167,21 @@ def _fetch_from_wikimedia(query: str, search_context: str = "", index: int = 0) 
     return None
 
 
-def _fetch_from_unsplash(query: str, access_key: str, page: int = 1) -> Optional[DestinationPhoto]:
-    """Fetches high-resolution photo from official Unsplash API if access key is provided."""
+UNWANTED_PHOTO_TERMS = (
+    "portrait", "man in", "woman in", "portrait of", "person", "selfie",
+    "male model", "female model", "guy standing", "man standing", "woman standing",
+    "close up of person", "headshot", "facial expression", "posing", "fashion model",
+    "portrait photography"
+)
+
+def _fetch_from_unsplash(query: str, access_key: str, page: int = 1, category: str = "attraction") -> Optional[DestinationPhoto]:
+    """Fetches high-resolution photo from official Unsplash API, filtering out unrelated portraits/people."""
     if not access_key:
         return None
     params = urlencode({
         "query": query,
         "orientation": "landscape",
-        "per_page": 1,
+        "per_page": 5,
         "page": max(1, page),
         "client_id": access_key
     })
@@ -176,17 +191,20 @@ def _fetch_from_unsplash(query: str, access_key: str, page: int = 1) -> Optional
         with urlopen(req, timeout=3.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         results = data.get("results", [])
-        if results:
-            first = results[0]
-            urls = first.get("urls", {})
-            user = first.get("user", {})
+        for item in results:
+            description = (item.get("description") or item.get("alt_description") or "").lower()
+            # Filter out person/portrait photos for attractions, hotels, and cuisine
+            if any(term in description for term in UNWANTED_PHOTO_TERMS):
+                continue
+            urls = item.get("urls", {})
+            user = item.get("user", {})
             user_name = user.get("name", "Unsplash Contributor")
             user_link = user.get("links", {}).get("html", "https://unsplash.com")
-            description = first.get("description") or first.get("alt_description") or f"Photo of {query}"
+            display_desc = item.get("description") or item.get("alt_description") or f"Photo of {query}"
             return DestinationPhoto(
                 image_url=urls.get("regular", urls.get("small", "")),
                 thumb_url=urls.get("small", ""),
-                alt_text=str(description),
+                alt_text=str(display_desc),
                 attribution_text=f"Photo by {user_name} on Unsplash",
                 attribution_url=f"{user_link}?utm_source=TripPilotAI&utm_medium=referral",
                 provider="Unsplash",
@@ -196,6 +214,14 @@ def _fetch_from_unsplash(query: str, access_key: str, page: int = 1) -> Optional
         pass
     return None
 
+
+FORBIDDEN_PHOTO_TERMS = (
+    "wine and other products", "products", "other products", "local products",
+    "souvenirs", "shopping", "electricity", "utilities", "electricity and utilities",
+    "tourist information", "practical information", "public holidays", "public holiday",
+    "stay safe", "stay healthy", "districts", "regions", "cities", "other destinations",
+    "the year in"
+)
 
 def get_destination_photo(
     name: str,
@@ -212,6 +238,20 @@ def get_destination_photo(
     """
     clean_name = name.strip()
     clean_dest = destination.strip()
+    folded_name = clean_name.lower()
+
+    # Reject non-attraction/utility/shopping terms from image fetching
+    if any(bad in folded_name for bad in FORBIDDEN_PHOTO_TERMS):
+        return DestinationPhoto(
+            image_url="",
+            thumb_url="",
+            alt_text=f"Reference for {clean_name}",
+            attribution_text="",
+            attribution_url="",
+            provider="None",
+            is_exact_match=False
+        )
+
     cache_key = f"{clean_name.casefold()}|{clean_dest.casefold()}|{category.casefold()}|{index}"
 
     # 1. In-memory cache
@@ -229,18 +269,26 @@ def get_destination_photo(
     # 3. Check for Unsplash Access Key
     unsplash_key = os.getenv("UNSPLASH_ACCESS_KEY", "").strip()
     if unsplash_key:
-        query = f"{clean_name} {clean_dest}".strip()
-        photo = _fetch_from_unsplash(query, unsplash_key, page=index + 1)
+        cat_lower = category.lower()
+        if "hotel" in cat_lower or "stay" in cat_lower or "accommodation" in cat_lower:
+            u_query = f"{clean_name} hotel resort"
+        elif "food" in cat_lower or "dining" in cat_lower or "cuisine" in cat_lower:
+            u_query = f"{clean_name} food dish"
+        elif "beach" in cat_lower:
+            u_query = f"{clean_name} beach {clean_dest}".strip()
+        else:
+            u_query = f"{clean_name} {clean_dest}".strip()
+        photo = _fetch_from_unsplash(u_query, unsplash_key, page=index + 1, category=category)
 
     # 4. Wikimedia Commons / Wikipedia API (Default primary provider)
     if not photo or not photo.image_url:
         # First attempt: exact landmark + destination
         photo = _fetch_from_wikimedia(clean_name, clean_dest, index=index)
 
-    # 5. Fallback attempt: if landmark not found individually, fetch city/destination photograph
+    # 5. Fallback attempt: only for index 0 to avoid repeating identical photo across every card
     if not photo or not photo.image_url:
-        if clean_dest and clean_name.lower() != clean_dest.lower():
-            dest_photo = _fetch_from_wikimedia(clean_dest, index=index)
+        if clean_dest and clean_name.lower() != clean_dest.lower() and index == 0:
+            dest_photo = _fetch_from_wikimedia(clean_dest, index=0)
             if dest_photo and dest_photo.image_url:
                 photo = DestinationPhoto(
                     image_url=dest_photo.image_url,
@@ -252,7 +300,7 @@ def get_destination_photo(
                     is_exact_match=False
                 )
 
-    # 6. If no image found anywhere, create neutral honest placeholder (no fabricated URL)
+    # 6. If no exact/unique image found, return neutral honest placeholder (no fabricated URL or duplicate)
     if not photo or not photo.image_url:
         photo = DestinationPhoto(
             image_url="",

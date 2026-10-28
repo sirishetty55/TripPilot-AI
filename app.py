@@ -240,8 +240,22 @@ if research_btn:
         with col_r3:
             st.metric("Party Size", f"{trip_req.travelers} Traveler(s)")
         with col_r4:
-            est_total_app = min(budget.total_estimated, float(trip_req.budget_inr))
-            st.metric("Estimated Trip Cost", f"₹{est_total_app:,.0f} (Est.)", help="Realistic total estimate for party; does not exceed budget limit.")
+            est_total_app = budget.total_estimated
+            is_over_app = budget.is_over_budget
+            diff_app = abs(budget.remaining_budget)
+            delta_app = f"+₹{diff_app:,.0f} Over Budget" if is_over_app else f"₹{diff_app:,.0f} Buffer Left"
+            st.metric(
+                "Estimated Trip Cost",
+                f"₹{est_total_app:,.0f} (Est.)",
+                delta=delta_app,
+                delta_color="inverse" if is_over_app else "normal",
+                help=f"Realistic estimate for {trip_req.travelers} traveler(s) based on selected dates and accommodation tier. Stated budget: ₹{trip_req.budget_inr:,.0f} INR."
+            )
+
+        if budget.is_over_budget:
+            st.warning(f"⚠️ **Budget Alert:** The estimated trip expenses (₹{est_total_app:,.0f}) exceed your specified budget of ₹{trip_req.budget_inr:,.0f} by ₹{diff_app:,.0f}. Review the Budget Planner to adjust accommodation tier or individual categories.")
+        else:
+            st.success(f"✅ **Budget Confirmation:** The estimated trip expenses (₹{est_total_app:,.0f}) are within your budget of ₹{trip_req.budget_inr:,.0f} with a buffer of ₹{diff_app:,.0f} remaining.")
 
         # Direct navigation helpers
         st.markdown("### 🧭 Next Steps")

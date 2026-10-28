@@ -27,24 +27,69 @@ def safe_url(url) -> str:
         pass
     return "#"
 
-def render_card_image(image_url: str, alt_text: str = "", width_px: int = 170, height_px: int = 120, attribution_text: str = "", attribution_url: str = "") -> str:
-    """Renders a safe, responsive image block with alt text and attribution link."""
-    clean_url = safe_url(image_url)
-    if clean_url == "#" or not image_url:
-        return ""
-    
-    escaped_alt = safe_html(alt_text)
-    escaped_attr_text = safe_html(attribution_text)
-    clean_attr_url = safe_url(attribution_url)
-    
-    attr_html = ""
-    if escaped_attr_text:
-        if clean_attr_url != "#":
-            attr_html = f'<div style="font-size: 10px; opacity: 0.7; margin-top: 3px; max-width: {width_px}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><a href="{clean_attr_url}" target="_blank" style="color: inherit; text-decoration: underline;">{escaped_attr_text}</a></div>'
-        else:
-            attr_html = f'<div style="font-size: 10px; opacity: 0.7; margin-top: 3px; max-width: {width_px}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{escaped_attr_text}</div>'
+def render_html(html_content: str):
+    """
+    Renders raw HTML safely in Streamlit without triggering Markdown indented code block formatting (<pre><code>).
+    Strips leading and trailing whitespace from every line to guarantee zero markdown code indentation.
+    """
+    if not html_content:
+        return
+    lines = [line.strip() for line in html_content.splitlines() if line.strip()]
+    clean_html = "\n".join(lines)
+    st.markdown(clean_html, unsafe_allow_html=True)
 
-    return f'<div style="flex-shrink: 0; width: {width_px}px;"><img src="{clean_url}" alt="{escaped_alt}" loading="lazy" style="width: {width_px}px; height: {height_px}px; object-fit: cover; border-radius: 8px;" />{attr_html}</div>'
+def render_card_image(
+    image_url: str,
+    alt_text: str = "",
+    width_px: int = 170,
+    height_px: int = 120,
+    category: str = "attraction",
+    attribution_text: str = "",
+    attribution_url: str = ""
+) -> str:
+    """Renders a safe, responsive image block with alt text and attribution, or a neutral styled placeholder if unavailable."""
+    clean_url = safe_url(image_url)
+    if clean_url != "#" and image_url and clean_url.startswith(("http://", "https://")):
+        escaped_alt = safe_html(alt_text)
+        escaped_attr_text = safe_html(attribution_text)
+        clean_attr_url = safe_url(attribution_url)
+        
+        attr_html = ""
+        if escaped_attr_text:
+            if clean_attr_url != "#":
+                attr_html = f'<div style="font-size: 10px; opacity: 0.7; margin-top: 3px; max-width: {width_px}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><a href="{clean_attr_url}" target="_blank" style="color: inherit; text-decoration: underline;">{escaped_attr_text}</a></div>'
+            else:
+                attr_html = f'<div style="font-size: 10px; opacity: 0.7; margin-top: 3px; max-width: {width_px}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{escaped_attr_text}</div>'
+
+        return f'<div style="flex-shrink: 0; width: {width_px}px;"><img src="{clean_url}" alt="{escaped_alt}" loading="lazy" style="width: {width_px}px; height: {height_px}px; object-fit: cover; border-radius: 8px;" />{attr_html}</div>'
+
+    # Fallback to a neutral, styled placeholder tile
+    cat_lower = str(category).lower()
+    icon = "🏛️"
+    label = "Attraction"
+    if any(k in cat_lower for k in ["beach", "coast", "bay", "sea"]):
+        icon = "🏖️"
+        label = "Beach & Coast"
+    elif any(k in cat_lower for k in ["fort", "castle", "palace", "heritage"]):
+        icon = "🏰"
+        label = "Heritage & Fort"
+    elif any(k in cat_lower for k in ["waterfall", "nature", "lake", "park", "garden", "wildlife", "valley", "mountain"]):
+        icon = "🌿"
+        label = "Nature & Scenic"
+    elif any(k in cat_lower for k in ["temple", "church", "cathedral", "basilica", "mosque", "spiritual", "shrine"]):
+        icon = "🛕"
+        label = "Spiritual & Culture"
+    elif any(k in cat_lower for k in ["hotel", "resort", "hostel", "stay", "accommodation"]):
+        icon = "🏨"
+        label = "Accommodation"
+    elif any(k in cat_lower for k in ["food", "dining", "cuisine", "restaurant", "cafe", "dish"]):
+        icon = "🍽️"
+        label = "Regional Dining"
+    elif any(k in cat_lower for k in ["flight", "transit", "train", "bus", "commute"]):
+        icon = "🚆"
+        label = "Transit Route"
+
+    return f'<div style="flex-shrink: 0; width: {width_px}px; height: {height_px}px; background: linear-gradient(135deg, rgba(13,148,136,0.12), rgba(2,132,199,0.12)); border: 1px solid rgba(13,148,136,0.25); border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 6px;"><span style="font-size: 30px;">{icon}</span><span style="font-size: 11px; font-weight: 600; opacity: 0.85; margin-top: 3px;">{label}</span></div>'
 
 def apply_custom_theme():
     """Applies modern travel-inspired CSS styling with full dark/light mode compatibility."""
