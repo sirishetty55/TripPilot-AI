@@ -121,7 +121,7 @@ flowchart TD
 
 ### 1. Clone & Set Up Directory
 ```bash
-cd Bunny_MCP
+cd TripPilot
 ```
 
 ### 2. Install Python Dependencies
@@ -136,7 +136,7 @@ cp .env.example .env
 ```
 Add your free Gemini API key from [Google AI Studio](https://aistudio.google.com/):
 ```env
-GEMINI_API_KEY=AIzaSy...
+GEMINI_API_KEY=...
 ```
 *(Note: If you do not provide a Gemini API key, TripPilot AI will seamlessly use its built-in rule-based heuristic extraction engine!)*
 
